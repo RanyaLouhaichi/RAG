@@ -256,6 +256,46 @@ class Neo4jManager:
             record = result.single()
             
             return record["impact_score"] if record else 0.0
+        
+    def update_ticket_metadata(self, ticket_key: str, metadata: Dict[str, Any]):
+        """Update ticket metadata"""
+        with self.driver.session() as session:
+            query = """
+            MATCH (t:Ticket {key: $ticket_key})
+            SET t += $metadata
+            SET t.updated_at = datetime()
+            RETURN t
+            """
+            
+            result = session.run(query, ticket_key=ticket_key, metadata=metadata)
+            return result.single()
+
+    def get_ticket_documentation(self, ticket_key: str) -> List[Dict[str, Any]]:
+        """Get all documentation for a ticket"""
+        with self.driver.session() as session:
+            query = """
+            MATCH (t:Ticket {key: $ticket_key})-[r:RESOLVES]-(d:Document)
+            RETURN d.id as doc_id, 
+                d.title as title, 
+                r.confidence as confidence,
+                r.metadata as relationship_metadata,
+                d.metadata as doc_metadata
+            ORDER BY r.confidence DESC
+            """
+            
+            result = session.run(query, ticket_key=ticket_key)
+            
+            docs = []
+            for record in result:
+                docs.append({
+                    "doc_id": record["doc_id"],
+                    "title": record["title"],
+                    "confidence": record["confidence"],
+                    "relationship_metadata": record["relationship_metadata"],
+                    "doc_metadata": record["doc_metadata"]
+                })
+            
+            return docs
     
     def update_relationship_feedback(self, doc_id: str, ticket_key: str, 
                                    helpful: bool):

@@ -129,6 +129,14 @@ def fix_jira_agent():
 # Fix on startup
 jira_connected = fix_jira_agent()
 
+try:
+    if orchestrator.enable_enhanced_rag():
+        logger.info("✅ Enhanced RAG enabled for Confluence publishing")
+    else:
+        logger.info("❌ Failed to enable enhanced RAG")
+except Exception as e:
+    logger.error(f"❌ Error enabling enhanced RAG: {e}")
+
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint"""
@@ -1042,6 +1050,59 @@ def generate_forecast(project_key):
             "error": str(e),
             "type": forecast_type
         }), 500
+    
+@app.route("/api/ticket-knowledge-graph/<ticket_id>", methods=["GET"])
+def get_ticket_knowledge_graph(ticket_id):
+    """Get knowledge graph data for a ticket"""
+    try:
+        if hasattr(orchestrator, 'enhanced_retrieval_agent'):
+            rag_pipeline = orchestrator.enhanced_retrieval_agent.rag_pipeline
+            
+            # Get ticket documentation
+            docs = rag_pipeline.neo4j_manager.get_ticket_documentation(ticket_id)
+            
+            # Get related tickets
+            related_query = """
+            MATCH (t:Ticket {key: $ticket_key})-[:RESOLVES]-(d:Document)-[:RESOLVES]-(other:Ticket)
+            WHERE other.key <> $ticket_key
+            RETURN DISTINCT other.key as ticket_key, other.summary as summary
+            LIMIT 10
+            """
+            
+            with rag_pipeline.neo4j_manager.driver.session() as session:
+                related = session.run(related_query, ticket_key=ticket_id)
+                related_tickets = [{"key": r["ticket_key"], "summary": r["summary"]} for r in related]
+            
+            return jsonify({
+                "status": "success",
+                "ticket_id": ticket_id,
+                "documentation": docs,
+                "related_tickets": related_tickets,
+                "graph_data": {
+                    "nodes": [
+                        {"id": ticket_id, "type": "ticket", "label": ticket_id}
+                    ] + [
+                        {"id": d["doc_id"], "type": "document", "label": d["title"]}
+                        for d in docs
+                    ],
+                    "edges": [
+                        {"source": ticket_id, "target": d["doc_id"], "type": "RESOLVES"}
+                        for d in docs
+                    ]
+                }
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "error": "Enhanced RAG not enabled"
+            }), 400
+            
+    except Exception as e:
+        logger.error(f"Error getting knowledge graph: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
 @app.route("/api/advanced-predictions/<project_key>", methods=["POST"])
 def get_advanced_predictions(project_key):
@@ -1373,6 +1434,34 @@ def submit_article_feedback(ticket_id):
             current_article["approved_at"] = datetime.now().isoformat()
             current_article["approved_version"] = current_version
             
+            # Extract project from ticket ID
+            project_key = ticket_id.split('-')[0] if '-' in ticket_id else "PROJ"
+            
+            # PUBLISH TO CONFLUENCE
+            logger.info(f"📚 Publishing approved article to Confluence space: {project_key}")
+            
+            # Get the enhanced retrieval agent (with RAG pipeline)
+            if hasattr(orchestrator, 'enhanced_retrieval_agent'):
+                rag_pipeline = orchestrator.enhanced_retrieval_agent.rag_pipeline
+                
+                publish_result = rag_pipeline.publish_article_to_confluence(
+                    article=current_article,
+                    ticket_id=ticket_id,
+                    project_key=project_key
+                )
+                
+                if publish_result["status"] == "success":
+                    # Update article with Confluence info
+                    current_article["confluence_page_id"] = publish_result["page_id"]
+                    current_article["confluence_url"] = publish_result["page_url"]
+                    current_article["published_to_confluence"] = True
+                    
+                    logger.info(f"✅ Published to Confluence: {publish_result['page_url']}")
+                else:
+                    logger.error(f"❌ Failed to publish to Confluence: {publish_result.get('error')}")
+            else:
+                logger.warning("Enhanced RAG not enabled - cannot publish to Confluence")
+            
             # Store final version
             final_key = f"article_approved:{ticket_id}"
             orchestrator.shared_memory.redis_client.set(
@@ -1381,13 +1470,12 @@ def submit_article_feedback(ticket_id):
             )
             orchestrator.shared_memory.redis_client.expire(final_key, 86400 * 30)  # 30 days
             
-            logger.info(f"✅ Article approved for {ticket_id}")
-            
             return jsonify({
                 "status": "success",
-                "message": "Article approved successfully",
+                "message": "Article approved and published to Confluence!",
                 "article": current_article,
-                "next_step": "publish_to_confluence"
+                "confluence_url": current_article.get("confluence_url"),
+                "next_step": "view_in_confluence"
             })
             
         elif action == "reject":
