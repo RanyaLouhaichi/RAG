@@ -1,0 +1,114 @@
+{
+  "articles": [
+    {
+      "id": "1",
+      "title": "Introduction to Agile Development",
+      "content": "Agile development is an iterative approach to software development that emphasizes flexibility, collaboration, and customer feedback. It includes methodologies like Scrum and Kanban, focusing on delivering small, incremental improvements. Teams work in sprints to adapt to changing requirements efficiently.",
+      "space": "IT-Projects",
+      "created_at": "2024-01-15T10:00:00Z",
+      "metadata": {
+        "author": "john_doe",
+        "tags": ["agile", "scrum", "software development"]
+      }
+    },
+    {
+      "id": "2",
+      "title": "Kubernetes Deployment Best Practices",
+      "content": "Kubernetes is a powerful platform for managing containerized workloads. Best practices include using declarative configurations, implementing health checks, and ensuring proper resource allocation. This guide covers scaling strategies, troubleshooting common deployment issues, and optimizing resource usage.",
+      "space": "DevOps",
+      "created_at": "2024-02-10T14:30:00Z",
+      "metadata": {
+        "author": "jane_smith",
+        "tags": ["kubernetes", "devops", "containers"]
+      }
+    },
+    {
+      "id": "3",
+      "title": "Confluence Collaboration Tips",
+      "content": "Effective collaboration in Confluence involves using page templates, mentions, and inline comments. Teams can leverage macros for dynamic content and ensure version control to track changes. Regular reviews and clear documentation standards improve overall team productivity.",
+      "space": "Team-Guides",
+      "created_at": "2024-03-05T09:15:00Z",
+      "metadata": {
+        "author": "alice_jones",
+        "tags": ["confluence", "collaboration", "documentation"]
+      }
+    },
+    {
+      "id": "4",
+      "title": "Microservices Architecture Overview",
+      "content": "Microservices architecture breaks applications into small, independent services that communicate via APIs. This approach enhances scalability and resilience but requires careful management of inter-service communication. Learn about service discovery and fault isolation techniques here.",
+      "space": "Architecture",
+      "created_at": "2024-04-12T11:00:00Z",
+      "metadata": {
+        "author": "bob_wilson",
+        "tags": ["microservices", "architecture", "api"]
+      }
+    },
+    {
+      "id": "5",
+      "title": "CI/CD Pipeline Setup Guide",
+      "content": "A CI/CD pipeline automates software delivery through continuous integration and deployment. Key steps include code testing, building, and deployment to production environments. This guide covers tool selection and pipeline optimization strategies.",
+      "space": "DevOps",
+      "created_at": "2024-05-20T13:45:00Z",
+      "metadata": {
+        "author": "jane_smith",
+        "tags": ["ci/cd", "devops", "automation"]
+      }
+    },
+    {
+      "id": "6",
+      "title": "Scrum Master Responsibilities",
+      "content": "A Scrum Master facilitates Agile processes, removes impediments, and ensures team adherence to Scrum practices. Responsibilities include sprint planning, daily stand-ups, and retrospective meetings. Effective communication is key to success in this role.",
+      "space": "IT-Projects",
+      "created_at": "2024-06-03T08:30:00Z",
+      "metadata": {
+        "author": "john_doe",
+        "tags": ["scrum", "agile", "team management"]
+      }
+    },
+    {
+      "id": "7",
+      "title": "Docker Container Basics",
+      "content": "Docker containers simplify application deployment by packaging code and dependencies. This guide covers container creation, management, and networking basics. Learn how to optimize Docker for production environments.",
+      "space": "DevOps",
+      "created_at": "2024-07-15T15:20:00Z",
+      "metadata": {
+        "author": "mike_brown",
+        "tags": ["docker", "containers", "devops"]
+      }
+    },
+    {
+      "id": "8",
+      "title": "Confluence Page Design Best Practices",
+      "content": "Designing effective Confluence pages involves clear headings, structured layouts, and visual aids. Use tables, images, and bullet points to enhance readability. Regularly update pages to maintain relevance and accuracy.",
+      "space": "Team-Guides",
+      "created_at": "2024-08-10T10:10:00Z",
+      "metadata": {
+        "author": "alice_jones",
+        "tags": ["confluence", "design", "documentation"]
+      }
+    },
+    {
+      "id": "9",
+      "title": "Scaling Applications with Kubernetes",
+      "content": "Scaling applications with Kubernetes involves auto-scaling groups and resource quotas. This article explores horizontal pod autoscaling and cluster management techniques. Ensure high availability with proper configuration.",
+      "space": "DevOps",
+      "created_at": "2024-09-05T12:00:00Z",
+      "metadata": {
+        "author": "jane_smith",
+        "tags": ["kubernetes", "scaling", "devops"]
+      }
+    },
+    {
+      "id": "10",
+      "title": "Agile Retrospective Techniques",
+      "content": "Agile retrospectives help teams reflect and improve after each sprint. Techniques include start-stop-continue, mad-sad-glad, and timeline exercises. Foster a culture of continuous improvement with these methods.",
+      "space": "IT-Projects",
+      "created_at": "2024-10-01T09:00:00Z",
+      "metadata": {
+        "author": "john_doe",
+        "tags": ["agile", "retrospective", "team improvement"]
+      }
+    }
+  ]
+}

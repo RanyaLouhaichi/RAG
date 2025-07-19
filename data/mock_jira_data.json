@@ -1,0 +1,513 @@
+{
+  "expand": "schema,names",
+  "startAt": 0,
+  "maxResults": 50,
+  "total": 7,
+  "issues": [
+    {
+      "id": "10000",
+      "key": "TICKET-001",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10000",
+      "fields": {
+        "project": {
+          "id": "10000",
+          "key": "PROJ123",
+          "name": "Project 123"
+        },
+        "summary": "Optimize build times",
+        "status": {
+          "name": "Done",
+          "id": "10001",
+          "statusCategory": {
+            "name": "Done",
+            "key": "done"
+          }
+        },
+        "assignee": {
+          "displayName": "UserX",
+          "accountId": "userx123"
+        },
+        "created": "2025-05-01T09:00:00Z",
+        "updated": "2025-05-07T14:00:00Z",
+        "resolutiondate": "2025-05-07T14:00:00Z",
+        "customfield_10010": 5
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-01T09:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-03T10:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "To Do",
+                "toString": "In Progress"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-07T14:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "In Progress",
+                "toString": "Done"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "10001",
+      "key": "TICKET-002",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10001",
+      "fields": {
+        "project": {
+          "id": "10000",
+          "key": "PROJ123",
+          "name": "Project 123"
+        },
+        "summary": "Implement feature X",
+        "status": {
+          "name": "In Progress",
+          "id": "3",
+          "statusCategory": {
+            "name": "In Progress",
+            "key": "indeterminate"
+          }
+        },
+        "assignee": {
+          "displayName": "UserY",
+          "accountId": "usery123"
+        },
+        "created": "2025-05-02T08:00:00Z",
+        "updated": "2025-05-10T09:00:00Z",
+        "resolutiondate": null,
+        "customfield_10010": 3
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-02T08:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-05T11:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "To Do",
+                "toString": "In Progress"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "10002",
+      "key": "TICKET-003",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10002",
+      "fields": {
+        "project": {
+          "id": "10000",
+          "key": "PROJ123",
+          "name": "Project 123"
+        },
+        "summary": "Fix bug Y",
+        "status": {
+          "name": "To Do",
+          "id": "1",
+          "statusCategory": {
+            "name": "To Do",
+            "key": "new"
+          }
+        },
+        "assignee": {
+          "displayName": "UserX",
+          "accountId": "userx123"
+        },
+        "created": "2025-05-08T15:00:00Z",
+        "updated": "2025-05-08T15:00:00Z",
+        "resolutiondate": null,
+        "customfield_10010": 2
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-08T15:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "10003",
+      "key": "TICKET-004",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10003",
+      "fields": {
+        "project": {
+          "id": "10000",
+          "key": "PROJ123",
+          "name": "Project 123"
+        },
+        "summary": "Unassigned issue",
+        "status": {
+          "name": "To Do",
+          "id": "1",
+          "statusCategory": {
+            "name": "To Do",
+            "key": "new"
+          }
+        },
+        "assignee": null,
+        "created": "2025-05-09T10:00:00Z",
+        "updated": "2025-05-09T10:00:00Z",
+        "resolutiondate": null,
+        "customfield_10010": 1
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-09T10:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "10004",
+      "key": "TICKET-005",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10004",
+      "fields": {
+        "project": {
+          "id": "10000",
+          "key": "PROJ123",
+          "name": "Project 123"
+        },
+        "summary": "Issue with multiple transitions",
+        "status": {
+          "name": "In Progress",
+          "id": "3",
+          "statusCategory": {
+            "name": "In Progress",
+            "key": "indeterminate"
+          }
+        },
+        "assignee": {
+          "displayName": "UserX",
+          "accountId": "userx123"
+        },
+        "created": "2025-05-01T08:00:00Z",
+        "updated": "2025-05-12T16:00:00Z",
+        "resolutiondate": null,
+        "customfield_10010": 4
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-01T08:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-02T09:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "To Do",
+                "toString": "In Progress"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-04T11:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "In Progress",
+                "toString": "Done"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-06T13:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "Done",
+                "toString": "To Do"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-08T15:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "To Do",
+                "toString": "In Progress"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+    "id": "10009",
+    "key": "TICKET-006",
+    "self": "https://example.atlassian.net/rest/api/2/issue/10009",
+    "fields": {
+        "project": {
+            "id": "10000",
+            "key": "PROJ123",
+            "name": "Project 123"
+        },
+        "summary": "Enhance user authentication",
+        "status": {
+            "name": "Done",
+            "id": "10001",
+            "statusCategory": {
+                "name": "Done",
+                "key": "done"
+            }
+        },
+        "assignee": {
+            "displayName": "UserY",
+            "accountId": "usery123"
+        },
+        "created": "2025-05-05T08:00:00Z",
+        "updated": "2025-05-12T15:00:00Z",
+        "resolutiondate": "2025-05-12T15:00:00Z",
+        "customfield_10010": 2
+    },
+    "changelog": {
+        "histories": [
+            {
+                "created": "2025-05-05T08:00:00Z",
+                "items": [
+                    {
+                        "field": "status",
+                        "fromString": null,
+                        "toString": "To Do"
+                    }
+                ]
+            },
+            {
+                "created": "2025-05-09T10:00:00Z",
+                "items": [
+                    {
+                        "field": "status",
+                        "fromString": "To Do",
+                        "toString": "In Progress"
+                    }
+                ]
+            },
+            {
+                "created": "2025-05-12T15:00:00Z",
+                "items": [
+                    {
+                        "field": "status",
+                        "fromString": "In Progress",
+                        "toString": "Done"
+                    }
+                ]
+            }
+        ]
+    }
+},
+{
+    "id": "10008",
+    "key": "TICKET-007",
+    "self": "https://example.atlassian.net/rest/api/2/issue/10008",
+    "fields": {
+        "project": {
+            "id": "10000",
+            "key": "PROJ123",
+            "name": "Project 123"
+        },
+        "summary": "Refactor authentication module",
+        "status": {
+            "name": "In Progress",
+            "id": "3",
+            "statusCategory": {
+                "name": "In Progress",
+                "key": "indeterminate"
+            }
+        },
+        "assignee": {
+            "displayName": "UserY",
+            "accountId": "usery123"
+        },
+        "created": "2025-05-03T09:00:00Z",
+        "updated": "2025-05-13T14:00:00Z",
+        "resolutiondate": null,
+        "customfield_10010": 2
+    },
+    "changelog": {
+        "histories": [
+            {
+                "created": "2025-05-03T09:00:00Z",
+                "items": [
+                    {
+                        "field": "status",
+                        "fromString": null,
+                        "toString": "To Do"
+                    }
+                ]
+            },
+            {
+                "created": "2025-05-07T10:00:00Z",
+                "items": [
+                    {
+                        "field": "status",
+                        "fromString": "To Do",
+                        "toString": "In Progress"
+                    }
+                ]
+            }
+        ]
+    }
+},
+    
+    {
+      "id": "10005",
+      "key": "PROJ456-1",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10005",
+      "fields": {
+        "project": {
+          "id": "10001",
+          "key": "PROJ456",
+          "name": "Project 456"
+        },
+        "summary": "Another project issue",
+        "status": {
+          "name": "Done",
+          "id": "10001",
+          "statusCategory": {
+            "name": "Done",
+            "key": "done"
+          }
+        },
+        "assignee": {
+          "displayName": "UserZ",
+          "accountId": "userz123"
+        },
+        "created": "2025-05-01T09:00:00Z",
+        "updated": "2025-05-05T12:00:00Z",
+        "resolutiondate": "2025-05-05T12:00:00Z",
+        "customfield_10010": 8
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-01T09:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-02T10:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "To Do",
+                "toString": "In Progress"
+              }
+            ]
+          },
+          {
+            "created": "2025-05-05T12:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": "In Progress",
+                "toString": "Done"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "10006",
+      "key": "PROJ789-1",
+      "self": "https://example.atlassian.net/rest/api/2/issue/10006",
+      "fields": {
+        "project": {
+          "id": "10002",
+          "key": "PROJ789",
+          "name": "Project 789"
+        },
+        "summary": "External project task",
+        "status": {
+          "name": "To Do",
+          "id": "1",
+          "statusCategory": {
+            "name": "To Do",
+            "key": "new"
+          }
+        },
+        "assignee": {
+          "displayName": "UserW",
+          "accountId": "userw123"
+        },
+        "created": "2025-05-09T10:00:00Z",
+        "updated": "2025-05-09T10:00:00Z",
+        "resolutiondate": null,
+        "customfield_10010": 1
+      },
+      "changelog": {
+        "histories": [
+          {
+            "created": "2025-05-09T10:00:00Z",
+            "items": [
+              {
+                "field": "status",
+                "fromString": null,
+                "toString": "To Do"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

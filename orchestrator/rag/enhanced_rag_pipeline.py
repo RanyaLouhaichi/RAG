@@ -1,0 +1,416 @@
+import logging
+from typing import Dict, Any, List, Optional, Tuple
+import numpy as np
+from datetime import datetime
+import hashlib
+from sentence_transformers import SentenceTransformer # type: ignore
+import chromadb # type: ignore
+import os
+
+from orchestrator.memory.graph.neo4j_manager import Neo4jManager # type: ignore
+from integrations.docling.confluence_extractor import ConfluenceDoclingExtractor
+from orchestrator.rag.semantic_chunker import SemanticChunkerWithLLMJudge, SemanticChunk # type: ignore
+
+class EnhancedRAGPipeline:
+    """Enhanced RAG with multi-level embeddings and incremental learning"""
+    
+    def __init__(self, 
+                 neo4j_uri: str,
+                 neo4j_user: str,
+                 neo4j_password: str,
+                 confluence_url: str,
+                 confluence_user: str,
+                 confluence_password: str,
+                 chroma_persist_dir: str = "./chroma_data_enhanced"):
+        
+        self.logger = logging.getLogger("EnhancedRAGPipeline")
+        
+        # Initialize components
+        self.neo4j_manager = Neo4jManager(neo4j_uri, neo4j_user, neo4j_password)
+        self.confluence_extractor = ConfluenceDoclingExtractor(
+            confluence_url, confluence_user, confluence_password
+        )
+        self.semantic_chunker = SemanticChunkerWithLLMJudge()
+        
+        # Initialize embedding models
+        self.chunk_embedder = SentenceTransformer('all-MiniLM-L6-v2')
+        self.doc_embedder = SentenceTransformer('all-mpnet-base-v2')  # Different model for doc-level
+        
+        # Initialize ChromaDB with multiple collections
+        self.chroma_client = chromadb.PersistentClient(path=chroma_persist_dir)
+        
+        # Collection for chunk-level embeddings
+        self.chunk_collection = self.chroma_client.get_or_create_collection(
+            name="confluence_chunks_enhanced",
+            metadata={"description": "Semantic chunks with quality scores"}
+        )
+        
+        # Collection for document-level embeddings
+        self.doc_collection = self.chroma_client.get_or_create_collection(
+            name="confluence_docs_enhanced",
+            metadata={"description": "Document-level embeddings"}
+        )
+        
+        self.logger.info("Enhanced RAG Pipeline initialized")
+    
+    def ingest_confluence_space(self, space_key: str, limit: int = 100):
+        """Ingest all documents from a Confluence space"""
+        self.logger.info(f"Starting ingestion of space: {space_key}")
+        
+        # Extract documents
+        documents = self.confluence_extractor.extract_space_documents(space_key, limit)
+        
+        for doc in documents:
+            try:
+                self.ingest_document(doc)
+            except Exception as e:
+                self.logger.error(f"Failed to ingest document {doc['id']}: {e}")
+                continue
+        
+        self.logger.info(f"Ingestion complete. Processed {len(documents)} documents")
+    
+    def ingest_document(self, document: Dict[str, Any]):
+        """Ingest a single document with all enhancements"""
+        doc_id = document['id']
+        self.logger.info(f"Ingesting document: {doc_id} - {document['title']}")
+        
+        # 1. Add document to Neo4j
+        self.neo4j_manager.add_document(
+            doc_id=doc_id,
+            title=document['title'],
+            content=document['content'],
+            metadata=document['metadata']
+        )
+        
+        # 2. Create document-level embedding
+        doc_embedding = self.doc_embedder.encode(
+            f"{document['title']} {document['content'][:1000]}"
+        )
+        
+        # Store document-level embedding
+        self.doc_collection.add(
+            embeddings=[doc_embedding.tolist()],
+            documents=[document['content'][:1000]],
+            metadatas=[{
+                'doc_id': doc_id,
+                'title': document['title'],
+                'space_key': document['space_key'],
+                'type': 'document',
+                'created_date': document['created_date']
+            }],
+            ids=[doc_id]
+        )
+        
+        # 3. Semantic chunking
+        chunks = self.semantic_chunker.chunk_confluence_document(document)
+        
+        # 4. Process each chunk
+        for i, chunk in enumerate(chunks):
+            chunk_id = f"{doc_id}_chunk_{i}"
+            
+            # Create chunk embedding
+            chunk_embedding = self.chunk_embedder.encode(chunk.content)
+            
+            # Store in ChromaDB
+            self.chunk_collection.add(
+                embeddings=[chunk_embedding.tolist()],
+                documents=[chunk.content],
+                metadatas=[{
+                    'chunk_id': chunk_id,
+                    'doc_id': doc_id,
+                    'doc_title': document['title'],
+                    'chunk_index': i,
+                    'quality_score': chunk.quality_score,
+                    'section': chunk.metadata.get('section', 'main'),
+                    **chunk.metadata
+                }],
+                ids=[chunk_id]
+            )
+            
+            # Add chunk to Neo4j
+            self.neo4j_manager.add_chunk(
+                chunk_id=chunk_id,
+                doc_id=doc_id,
+                content=chunk.content[:500],  # Store preview
+                chunk_index=i,
+                embedding_id=chunk_id
+            )
+        
+        # 5. Extract and link ticket references
+        ticket_refs = self.confluence_extractor.find_ticket_references(document)
+        for ticket_key in ticket_refs:
+            self.neo4j_manager.link_document_to_ticket(
+                doc_id=doc_id,
+                ticket_key=ticket_key,
+                relationship_type="REFERENCES"
+            )
+        
+        self.logger.info(f"Successfully ingested {doc_id} with {len(chunks)} chunks")
+    
+    def hybrid_search(self, 
+                     query: str,
+                     ticket_context: Optional[Dict[str, Any]] = None,
+                     k: int = 10) -> List[Dict[str, Any]]:
+        """Hybrid search combining vector similarity and graph relationships"""
+        
+        results = []
+        
+        # 1. Vector search at document level
+        doc_query_embedding = self.doc_embedder.encode(query)
+        doc_results = self.doc_collection.query(
+            query_embeddings=[doc_query_embedding.tolist()],
+            n_results=k // 2
+        )
+        
+        # 2. Vector search at chunk level
+        chunk_query_embedding = self.chunk_embedder.encode(query)
+        chunk_results = self.chunk_collection.query(
+            query_embeddings=[chunk_query_embedding.tolist()],
+            n_results=k
+        )
+        
+        # 3. Graph-based search if ticket context provided
+        graph_results = []
+        if ticket_context and ticket_context.get('ticket_key'):
+            graph_results = self.neo4j_manager.find_related_documents(
+                ticket_key=ticket_context['ticket_key'],
+                limit=k // 2
+            )
+        
+        # 4. Combine and re-rank results
+        all_results = self._combine_search_results(
+            doc_results, chunk_results, graph_results, query
+        )
+        
+        # 5. Apply incremental learning if we have feedback
+        if ticket_context and ticket_context.get('user_feedback'):
+            self._apply_incremental_learning(
+                all_results, 
+                ticket_context['user_feedback']
+            )
+        
+        return all_results[:k]
+    
+    def _combine_search_results(self,
+                               doc_results: Dict[str, Any],
+                               chunk_results: Dict[str, Any], 
+                               graph_results: List[Dict[str, Any]],
+                               query: str) -> List[Dict[str, Any]]:
+        """Combine results from different sources with intelligent ranking"""
+        
+        combined = {}
+        
+        # Process document-level results
+        if doc_results['ids']:
+            for i, doc_id in enumerate(doc_results['ids'][0]):
+                if doc_id not in combined:
+                    combined[doc_id] = {
+                        'id': doc_id,
+                        'content': doc_results['documents'][0][i],
+                        'metadata': doc_results['metadatas'][0][i],
+                        'scores': {
+                            'doc_similarity': 1.0 - doc_results['distances'][0][i],
+                            'chunk_similarity': 0.0,
+                            'graph_relevance': 0.0
+                        },
+                        'source_types': ['doc_embedding']
+                    }
+        
+        # Process chunk-level results
+        if chunk_results['ids']:
+            for i, chunk_id in enumerate(chunk_results['ids'][0]):
+                doc_id = chunk_results['metadatas'][0][i]['doc_id']
+                
+                if doc_id not in combined:
+                    combined[doc_id] = {
+                        'id': doc_id,
+                        'content': chunk_results['documents'][0][i],
+                        'metadata': chunk_results['metadatas'][0][i],
+                        'scores': {
+                            'doc_similarity': 0.0,
+                            'chunk_similarity': 0.0,
+                            'graph_relevance': 0.0
+                        },
+                        'source_types': []
+                    }
+                
+                # Update chunk similarity (take max)
+                chunk_score = 1.0 - chunk_results['distances'][0][i]
+                quality_score = chunk_results['metadatas'][0][i].get('quality_score', 0.5)
+                adjusted_score = chunk_score * (0.7 + 0.3 * quality_score)  # Quality bonus
+                
+                combined[doc_id]['scores']['chunk_similarity'] = max(
+                    combined[doc_id]['scores']['chunk_similarity'],
+                    adjusted_score
+                )
+                
+                if 'chunk_embedding' not in combined[doc_id]['source_types']:
+                    combined[doc_id]['source_types'].append('chunk_embedding')
+        
+        # Process graph results
+        for result in graph_results:
+            doc_id = result['id']
+            
+            if doc_id not in combined:
+                combined[doc_id] = {
+                    'id': doc_id,
+                    'content': result['content'],
+                    'metadata': {'title': result['title']},
+                    'scores': {
+                        'doc_similarity': 0.0,
+                        'chunk_similarity': 0.0,
+                        'graph_relevance': 0.0
+                    },
+                    'source_types': []
+                }
+            
+            combined[doc_id]['scores']['graph_relevance'] = result['relevance']
+            if 'knowledge_graph' not in combined[doc_id]['source_types']:
+                combined[doc_id]['source_types'].append('knowledge_graph')
+        
+        # Calculate final scores
+        results = []
+        for doc_id, data in combined.items():
+            # Weighted combination of scores
+            final_score = (
+                data['scores']['doc_similarity'] * 0.3 +
+                data['scores']['chunk_similarity'] * 0.4 +
+                data['scores']['graph_relevance'] * 0.3
+            )
+            
+            # Bonus for multiple sources
+            source_bonus = len(data['source_types']) * 0.1
+            final_score = min(final_score + source_bonus, 1.0)
+            
+            results.append({
+                'id': doc_id,
+                'content': data['content'],
+                'metadata': data['metadata'],
+                'relevance_score': final_score,
+                'score_breakdown': data['scores'],
+                'sources': data['source_types']
+            })
+        
+        # Sort by final score
+        results.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        return results
+    
+    def _apply_incremental_learning(self, 
+                                   results: List[Dict[str, Any]],
+                                   feedback: Dict[str, Any]):
+        """Apply user feedback to improve future rankings"""
+        
+        for result in results:
+            doc_id = result['id']
+            
+            # Update graph relationships based on feedback
+            if feedback.get('ticket_key') and feedback.get('helpful_docs'):
+                if doc_id in feedback['helpful_docs']:
+                    self.neo4j_manager.update_relationship_feedback(
+                        doc_id=doc_id,
+                        ticket_key=feedback['ticket_key'],
+                        helpful=True
+                    )
+                    
+                    # If very helpful, create RESOLVES relationship
+                    if feedback.get('resolved_ticket'):
+                        self.neo4j_manager.link_document_to_ticket(
+                            doc_id=doc_id,
+                            ticket_key=feedback['ticket_key'],
+                            relationship_type="RESOLVES",
+                            confidence=0.9
+                        )
+    
+    def get_recommendations_for_ticket(self, ticket_key: str, 
+                                     ticket_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get document recommendations specifically for a ticket"""
+        
+        # Build enhanced query from ticket data
+        query_parts = [
+            ticket_data.get('summary', ''),
+            ticket_data.get('description', '')[:500],
+            ticket_data.get('issue_type', ''),
+            f"project {ticket_data.get('project_key', '')}"
+        ]
+        
+        enhanced_query = " ".join(filter(None, query_parts))
+        
+        # Search with ticket context
+        results = self.hybrid_search(
+            query=enhanced_query,
+            ticket_context={
+                'ticket_key': ticket_key,
+                'project_key': ticket_data.get('project_key'),
+                'issue_type': ticket_data.get('issue_type'),
+                'status': ticket_data.get('status')
+            }
+        )
+        
+        # Look for solution patterns
+        if ticket_data.get('project_key'):
+            patterns = self.neo4j_manager.find_solution_patterns(
+                project_key=ticket_data['project_key'],
+                issue_type=ticket_data.get('issue_type')
+            )
+            
+            # Boost documents that solved similar tickets
+            for pattern in patterns:
+                for doc in pattern['resolving_documents']:
+                    for result in results:
+                        if result['id'] == doc['id']:
+                            result['relevance_score'] *= 1.2  # Boost
+                            result['metadata']['solved_similar'] = True
+                            break
+        
+        # Re-sort after boosting
+        results.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        return results
+    
+    def add_jira_tickets(self, tickets: List[Dict[str, Any]]):
+        """Add Jira tickets to knowledge graph"""
+        self.logger.info(f"Adding {len(tickets)} tickets to knowledge graph")
+        
+        for ticket in tickets:
+            try:
+                fields = ticket.get('fields', {})
+                
+                self.neo4j_manager.add_ticket(
+                    ticket_key=ticket['key'],
+                    summary=fields.get('summary', ''),
+                    project_key=fields.get('project', {}).get('key', ''),
+                    status=fields.get('status', {}).get('name', ''),
+                    metadata={
+                        'issue_type': fields.get('issuetype', {}).get('name', ''),
+                        'priority': fields.get('priority', {}).get('name', ''),
+                        'assignee': fields.get('assignee', {}).get('displayName', '') if fields.get('assignee') else '',
+                        'created': fields.get('created', ''),
+                        'updated': fields.get('updated', '')
+                    }
+                )
+                
+            except Exception as e:
+                self.logger.error(f"Failed to add ticket {ticket.get('key')}: {e}")
+    
+    def update_document_impact_scores(self):
+        """Update impact scores for all documents based on their ticket relationships"""
+        self.logger.info("Updating document impact scores")
+        
+        # Get all documents from ChromaDB
+        all_docs = self.doc_collection.get()
+        
+        for i, doc_id in enumerate(all_docs['ids']):
+            impact_score = self.neo4j_manager.get_document_impact_score(doc_id)
+            
+            # Update metadata in ChromaDB
+            metadata = all_docs['metadatas'][i]
+            metadata['impact_score'] = impact_score
+            
+            # Update the document
+            self.doc_collection.update(
+                ids=[doc_id],
+                metadatas=[metadata]
+            )
+        
+        self.logger.info("Impact scores updated")
