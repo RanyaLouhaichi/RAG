@@ -138,27 +138,43 @@ class Neo4jManager:
             return record["key"]
     
     def link_document_to_ticket(self, doc_id: str, ticket_key: str, 
-                                relationship_type: str = "REFERENCES",
-                                confidence: float = 0.8):
-        """Create relationship between document and ticket"""
+                           relationship_type: str = "REFERENCES",
+                           confidence: float = 1.0,
+                           metadata: Dict[str, Any] = None):
+        """Create a relationship between a document and a ticket"""
         with self.driver.session() as session:
-            query = f"""
-            MATCH (d:Document {{id: $doc_id}})
-            MATCH (t:Ticket {{key: $ticket_key}})
-            MERGE (d)-[r:{relationship_type} {{
-                confidence: $confidence,
-                created_at: datetime()
-            }}]->(t)
-            RETURN d.id, t.key
+            # First ensure both nodes exist
+            ensure_query = """
+            MERGE (d:Document {id: $doc_id})
+            MERGE (t:Ticket {key: $ticket_key})
             """
+            session.run(ensure_query, doc_id=doc_id, ticket_key=ticket_key)
             
-            session.run(query,
-                doc_id=doc_id,
+            # Then create the relationship
+            query = """
+            MATCH (d:Document {id: $doc_id})
+            MATCH (t:Ticket {key: $ticket_key})
+            MERGE (d)-[r:%s {confidence: $confidence}]->(t)
+            SET r.created_at = datetime()
+            SET r.metadata = $metadata
+            RETURN d, r, t
+            """ % relationship_type  # Using string formatting for relationship type
+            
+            result = session.run(
+                query, 
+                doc_id=doc_id, 
                 ticket_key=ticket_key,
-                confidence=confidence
+                confidence=confidence,
+                metadata=metadata or {}
             )
             
-            self.logger.info(f"Linked document {doc_id} to ticket {ticket_key}")
+            record = result.single()
+            if record:
+                self.logger.info(f"Created {relationship_type} relationship: {doc_id} -> {ticket_key}")
+            else:
+                self.logger.error(f"Failed to create relationship: {doc_id} -> {ticket_key}")
+        
+        return record
     
     def find_related_documents(self, ticket_key: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Find documents related to a ticket through various paths"""

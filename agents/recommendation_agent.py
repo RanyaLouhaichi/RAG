@@ -40,8 +40,8 @@ class RecommendationAgent(BaseAgent):
         
         self.log(f"Enhanced RecommendationAgent initialized with collaborative capabilities")
         
-        self.monitoring_thread = threading.Thread(target=self._check_for_updates_loop, daemon=True)
-        self.monitoring_thread.start()
+        #self.monitoring_thread = threading.Thread(target=self._check_for_updates_loop, daemon=True)
+        #self.monitoring_thread.start()
 
     def _check_for_updates(self):
         try:

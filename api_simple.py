@@ -2835,6 +2835,52 @@ def suggestion_analytics():
             "error": str(e)
         }), 500
     
+@app.route("/api/neo4j/debug/<ticket_id>", methods=["GET"])
+def debug_neo4j_ticket(ticket_id):
+    """Debug Neo4j data for a ticket"""
+    try:
+        if not hasattr(orchestrator, 'enhanced_retrieval_agent'):
+            return jsonify({"error": "Enhanced RAG not enabled"}), 400
+            
+        neo4j_manager = orchestrator.enhanced_retrieval_agent.rag_pipeline.neo4j_manager
+        
+        with neo4j_manager.driver.session() as session:
+            # Check if ticket exists
+            ticket_query = """
+            MATCH (t:Ticket {key: $ticket_key})
+            RETURN t
+            """
+            ticket_result = session.run(ticket_query, ticket_key=ticket_id)
+            ticket = ticket_result.single()
+            
+            # Check documents
+            doc_query = """
+            MATCH (t:Ticket {key: $ticket_key})-[r]-(d:Document)
+            RETURN d.id as doc_id, d.title as title, type(r) as rel_type, r.confidence as confidence
+            """
+            doc_result = session.run(doc_query, ticket_key=ticket_id)
+            documents = [dict(record) for record in doc_result]
+            
+            # Check all relationships
+            rel_query = """
+            MATCH (t:Ticket {key: $ticket_key})-[r]-()
+            RETURN type(r) as rel_type, count(r) as count
+            """
+            rel_result = session.run(rel_query, ticket_key=ticket_id)
+            relationships = [dict(record) for record in rel_result]
+            
+            return jsonify({
+                "ticket_exists": ticket is not None,
+                "ticket_data": dict(ticket["t"]) if ticket else None,
+                "documents": documents,
+                "relationships": relationships,
+                "document_count": len(documents)
+            })
+            
+    except Exception as e:
+        logger.error(f"Neo4j debug error: {e}")
+        return jsonify({"error": str(e)}), 500
+    
 @app.route("/api/updates/debug", methods=["GET"])
 def debug_updates():
     """Debug endpoint to see all stored updates"""
