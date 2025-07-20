@@ -129,20 +129,26 @@ class JiraAPIClient:
         }
         return self._make_request("GET", f"issue/{issue_key}", params=params)
     
+    # Fix for jira_api_client.py - get_all_issues_for_project method
+
     def get_all_issues_for_project(self, project_key: str, start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get all issues for a project with optional date filtering"""
-        # Build JQL without date filtering if dates not provided
+        # Build JQL - start with just the project
         jql = f"project = {project_key}"
         
-        # Only add date filtering if explicitly provided
-        if start_date and end_date:
-            jql += f" AND updated >= '{start_date}' AND updated <= '{end_date}'"
-        elif start_date:
-            jql += f" AND updated >= '{start_date}'"
-        elif end_date:
-            jql += f" AND updated <= '{end_date}'"
+        # Only add date filtering if BOTH dates are explicitly provided and valid
+        if start_date and end_date and start_date != "None" and end_date != "None":
+            # Validate dates aren't empty strings
+            if len(start_date.strip()) > 0 and len(end_date.strip()) > 0:
+                jql += f" AND updated >= '{start_date}' AND updated <= '{end_date}'"
+                self.logger.info(f"Using date filter: {start_date} to {end_date}")
+        else:
+            self.logger.info(f"No date filter - fetching ALL issues for project {project_key}")
         
+        # Always order by updated date
         jql += " ORDER BY updated DESC"
+        
+        self.logger.info(f"Final JQL query: {jql}")
         
         all_issues = []
         start_at = 0
@@ -158,7 +164,8 @@ class JiraAPIClient:
                     total = result.get("total", 0)
                     self.logger.info(f"Total issues matching query: {total}")
                 
-                if len(all_issues) >= total or len(issues) < self.API_PAGE_SIZE:
+                # Check if we've fetched all issues
+                if len(all_issues) >= total or len(issues) < APIConfig.API_PAGE_SIZE:
                     break
                 
                 start_at += len(issues)

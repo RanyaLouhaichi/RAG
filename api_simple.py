@@ -339,8 +339,7 @@ def dashboard(project_id):
         
         # Get time range from request (optional)
         time_range = {}
-        if request.method == "POST" and request.json:
-            time_range = request.json.get("time_range", {})
+        logger.info(f"Fetching ALL tickets for project {project_id} (no date filter)")
         
         # Run the full productivity workflow
         state = orchestrator.run_productivity_workflow(project_id, time_range)

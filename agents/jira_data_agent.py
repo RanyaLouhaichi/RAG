@@ -308,39 +308,13 @@ class JiraDataAgent(BaseAgent):
                 self.log("[ERROR] Jira connection test failed")
                 return []
             
-            # IMPORTANT: Don't use date filters unless explicitly provided and valid
-            # Check if time_range is actually provided and has valid dates
-            use_dates = False
-            start_date = None
-            end_date = None
+            all_issues = self.jira_client.get_all_issues_for_project(
+                project_id,
+                None,  # No start date
+                None   # No end date
+            )
             
-            if time_range and isinstance(time_range, dict):
-                start_date = time_range.get('start')
-                end_date = time_range.get('end')
-                
-                # Only use dates if they are actually provided and not empty
-                if start_date and end_date and start_date != 'all' and end_date != 'all':
-                    use_dates = True
-                    self.log(f"Using date range: {start_date} to {end_date}")
-                else:
-                    self.log("No valid date range provided, fetching all tickets")
-            
-            # Get all issues for the project
-            if use_dates:
-                all_issues = self.jira_client.get_all_issues_for_project(
-                    project_id,
-                    start_date,
-                    end_date
-                )
-            else:
-                # Call without date parameters to get ALL tickets
-                all_issues = self.jira_client.get_all_issues_for_project(
-                    project_id,
-                    None,  # No start date
-                    None   # No end date
-                )
-            
-            self.log(f"✅ Loaded {len(all_issues)} tickets via API")
+            self.log(f"✅ Loaded {len(all_issues)} tickets via API (all tickets, no date filter)")
             
             # Cache the data
             cache_key = f"jira_api_data:{project_id}:all"
@@ -458,46 +432,59 @@ class JiraDataAgent(BaseAgent):
         if not tickets:
             self.log("No tickets to filter")
             return []
+        
         # Ensure tickets is a list
         if tickets is None:
             self.log("[WARNING] Tickets is None, returning empty list")
             return []
         
+        # DEBUG: Log what we're working with
+        self.log(f"[FILTER] Filtering {len(tickets)} tickets for project {project_id}")
+        self.log(f"[FILTER] No date filtering applied - returning all tickets for project")
+        
         # DEBUG: Log ticket status distribution BEFORE filtering
         status_debug = {}
+        project_debug = {}
         for ticket in tickets:
             status = ticket.get("fields", {}).get("status", {}).get("name", "Unknown")
             status_debug[status] = status_debug.get(status, 0) + 1
+            
+            # Get project from ticket
+            ticket_project = ticket.get("fields", {}).get("project", {}).get("key", "Unknown")
+            project_debug[ticket_project] = project_debug.get(ticket_project, 0) + 1
         
         self.log(f"[DEBUG] Raw ticket status distribution: {status_debug}")
+        self.log(f"[DEBUG] Raw ticket project distribution: {project_debug}")
         self.log(f"[DEBUG] Total raw tickets: {len(tickets)}")
         
-        # For MCP data, just filter by project if needed
+        # For API data, filter by project only - NO DATE FILTERING
         filtered_tickets = []
         
         if self.use_mcp or self.use_real_api:
-            self.log(f"MCP/API data - filtering for project {project_id}")
+            self.log(f"API/MCP data - filtering for project {project_id} only")
             
             for ticket in tickets:
-                # Get project key from ticket
-                ticket_key = ticket.get("key", "")
-                ticket_project = ticket_key.split("-")[0] if "-" in ticket_key else ""
+                # Get project key from ticket - check multiple places
+                ticket_project = None
                 
-                # Also check fields.project.key as backup
+                # Method 1: From ticket key (e.g., "FISCD-1" -> "FISCD")
+                ticket_key = ticket.get("key", "")
+                if "-" in ticket_key:
+                    ticket_project = ticket_key.split("-")[0]
+                
+                # Method 2: From fields.project.key
                 if not ticket_project:
                     ticket_project = ticket.get("fields", {}).get("project", {}).get("key", "")
                 
+                # Check if this ticket belongs to our target project
                 if ticket_project == project_id:
                     filtered_tickets.append(ticket)
-                    
-                    # DEBUG: Log each ticket's status
-                    status = ticket.get("fields", {}).get("status", {}).get("name", "Unknown")
-                    self.log(f"[DEBUG] Ticket {ticket.get('key')}: Status = {status}")
             
             self.log(f"Filtered to {len(filtered_tickets)} tickets for project {project_id}")
         else:
-            # For mock data, use original filtering logic
-            filtered_tickets = tickets  # Or apply your mock filtering logic
+            # For mock data, return all tickets
+            filtered_tickets = tickets
+            self.log(f"Mock data - returning all {len(filtered_tickets)} tickets")
         
         # More debugging
         filtered_status_debug = {}
@@ -508,23 +495,29 @@ class JiraDataAgent(BaseAgent):
         self.log(f"[DEBUG] Filtered ticket status distribution: {filtered_status_debug}")
         
         # Cache the filtered results
-        cache_key = f"filtered_tickets:{project_id}:{time_range.get('start', 'all')}:{time_range.get('end', 'all')}"
+        cache_key = f"filtered_tickets:{project_id}:all:all"  # No date range in cache key
+        
         filter_metadata = {
             "filtered_at": datetime.now().isoformat(),
             "source_count": len(tickets),
             "filtered_count": len(filtered_tickets),
             "project_id": project_id,
-            "status_distribution": filtered_status_debug
+            "status_distribution": filtered_status_debug,
+            "date_filter_applied": False  # Explicitly note no date filtering
         }
         
-        self.redis_client.set(cache_key, json.dumps(filtered_tickets))
-        self.redis_client.set(f"{cache_key}:metadata", json.dumps(filter_metadata))
-        self.redis_client.expire(cache_key, 1800)  # Cache for 30 minutes
-        self.redis_client.expire(f"{cache_key}:metadata", 1800)
+        if filtered_tickets:  # Only cache if we have results
+            self.redis_client.set(cache_key, json.dumps(filtered_tickets))
+            self.redis_client.set(f"{cache_key}:metadata", json.dumps(filter_metadata))
+            self.redis_client.expire(cache_key, 1800)  # Cache for 30 minutes
+            self.redis_client.expire(f"{cache_key}:metadata", 1800)
         
-        self._assess_filtered_data_collaboration(filtered_tickets, project_id, "mcp_filtered" if self.use_mcp else "api_filtered")
+        # Assess collaboration opportunities
+        if self.use_mcp or self.use_real_api:
+            self._assess_filtered_data_collaboration(filtered_tickets, project_id, 
+                                                    "mcp_filtered" if self.use_mcp else "api_filtered")
         
-        return filtered_tickets  # ALWAYS return a list, never None
+        return filtered_tickets
 
     def _act(self) -> Dict[str, Any]:
         """Enhanced action method with proper data retrieval"""
@@ -555,32 +548,14 @@ class JiraDataAgent(BaseAgent):
                     }
             
             # CRITICAL FIX: Ensure time_range is never None and check if it's actually needed
-            if time_range is None:
-                time_range = {}
-            
-            # Check if time_range has actual dates or is empty/default
-            has_valid_dates = (
-                time_range and 
-                time_range.get('start') and 
-                time_range.get('end') and
-                time_range.get('start') != 'all' and
-                time_range.get('end') != 'all'
-            )
-            
-            if not has_valid_dates:
-                # Clear time_range to avoid using default dates
-                time_range = {}
-                self.log("[ACTION] No valid time range specified, will fetch all tickets")
+
+            time_range = {}
             
             analysis_depth = self.mental_state.get_belief("requested_analysis_depth") or "basic"
             collaboration_context = self.mental_state.get_belief("collaboration_context")
             workflow_context = self.mental_state.get_belief("workflow_context")
             
             self.log(f"[ACTION] Retrieving data for project {project_id}")
-            if has_valid_dates:
-                self.log(f"[ACTION] Using time range: {time_range}")
-            else:
-                self.log(f"[ACTION] Fetching all tickets (no time filter)")
             
             # NEW: Check if this is a real-time update context
             is_realtime_update = (
@@ -613,15 +588,16 @@ class JiraDataAgent(BaseAgent):
                 
                 # Store project info for loading
                 self.mental_state.add_belief("loading_project", project_id, 0.9, "data_loading")
-                self.mental_state.add_belief("loading_time_range", time_range, 0.9, "data_loading")
+                # Don't store time_range - we want ALL tickets
+                self.mental_state.add_belief("loading_time_range", {}, 0.9, "data_loading")
                 
                 # Load all data
                 all_tickets = self._load_jira_data()
                 
-                # Filter tickets
-                filtered_tickets = self._filter_tickets(all_tickets, project_id, time_range)
+                # Filter tickets (project filter only, no date filter)
+                filtered_tickets = self._filter_tickets(all_tickets, project_id, {})
                 
-                # Cache the filtered results (with shorter TTL for real-time updates)
+                # Cache the filtered results
                 if filtered_tickets:
                     cache_ttl = 300 if is_realtime_update else 7200  # 5 minutes vs 2 hours
                     self.redis_client.set(tickets_key, json.dumps(filtered_tickets))
