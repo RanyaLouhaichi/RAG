@@ -1,5 +1,6 @@
 # agents/jira_article_generator_agent.py - COMPLETE VERSION WITH FEEDBACK
 import json
+import re
 from typing import Dict, Any, List, Optional
 from agents.base_agent import BaseAgent, AgentCapability
 from orchestrator.memory.shared_memory import JurixSharedMemory # type: ignore
@@ -24,24 +25,347 @@ class JiraArticleGeneratorAgent(BaseAgent):
         self.mental_state.capabilities = [
             AgentCapability.GENERATE_ARTICLE,
             AgentCapability.COORDINATE_AGENTS,
-            AgentCapability.PROCESS_FEEDBACK  # New capability
+            AgentCapability.PROCESS_FEEDBACK
         ]
         
         self.mental_state.obligations.extend([
             "detect_query_type",
             "generate_article",
+            "extract_solution_from_comments",  # NEW: Extract actual solutions
+            "analyze_ticket_history",          # NEW: Analyze what was done
+            "identify_fix_patterns",           # NEW: Identify the actual fix
             "assess_collaboration_needs",
             "coordinate_with_agents",
-            "process_human_feedback",  # New obligation
-            "track_article_versions"    # New obligation
+            "process_human_feedback",
+            "track_article_versions"
         ])
 
-        # Collaboration settings
         self.collaboration_threshold = 0.4
         self.always_try_collaboration = True
-        
-        # Feedback tracking
         self.max_refinement_iterations = 5
+
+    def _extract_solution_from_ticket(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract the ACTUAL solution from ticket comments and history"""
+        self.log(f"[SOLUTION EXTRACTION] Analyzing ticket for actual resolution")
+        
+        solution_data = {
+            "problem_description": "",
+            "actual_solution": "",
+            "fix_details": [],
+            "code_changes": [],
+            "configuration_changes": [],
+            "resolution_steps": [],
+            "root_cause": "",
+            "preventive_measures": [],
+            "who_fixed": "",
+            "when_fixed": "",
+            "verification_steps": []
+        }
+        
+        fields = ticket.get("fields", {})
+        
+        # 1. Extract problem from description
+        solution_data["problem_description"] = fields.get("summary", "") + "\n" + fields.get("description", "")
+        
+        # 2. CRITICAL: Extract solution from comments
+        comments = fields.get("comment", {}).get("comments", [])
+        self.log(f"[SOLUTION EXTRACTION] Found {len(comments)} comments to analyze")
+        
+        for comment in comments:
+            comment_body = comment.get("body", "").lower()
+            author = comment.get("author", {}).get("displayName", "Unknown")
+            created = comment.get("created", "")
+            
+            # Look for solution indicators in comments
+            solution_indicators = [
+                "fixed by", "resolved by", "solution:", "fix:", "solved:",
+                "the issue was", "the problem was", "root cause", "caused by",
+                "applied", "implemented", "changed", "updated", "modified",
+                "deployed", "merged", "committed", "pushed"
+            ]
+            
+            if any(indicator in comment_body for indicator in solution_indicators):
+                self.log(f"[SOLUTION EXTRACTION] Found solution indicator in comment by {author}")
+                solution_data["fix_details"].append({
+                    "author": author,
+                    "date": created,
+                    "content": comment.get("body", "")
+                })
+                
+                # Extract specific fixes
+                self._extract_specific_fixes(comment.get("body", ""), solution_data)
+        
+        # 3. Analyze ticket history for actual changes
+        changelog = ticket.get("changelog", {}).get("histories", [])
+        self.log(f"[SOLUTION EXTRACTION] Analyzing {len(changelog)} history entries")
+        
+        for history in changelog:
+            author = history.get("author", {}).get("displayName", "Unknown")
+            created = history.get("created", "")
+            
+            for item in history.get("items", []):
+                field = item.get("field", "")
+                from_val = item.get("fromString", "")
+                to_val = item.get("toString", "")
+                
+                # Track status changes to Done/Resolved
+                if field == "status" and to_val in ["Done", "Resolved", "Closed"]:
+                    solution_data["who_fixed"] = author
+                    solution_data["when_fixed"] = created
+                    self.log(f"[SOLUTION EXTRACTION] Ticket resolved by {author} on {created}")
+        
+        # 4. Build the actual solution narrative
+        if solution_data["fix_details"]:
+            # Combine all fix details into a coherent solution
+            solution_parts = []
+            for fix in solution_data["fix_details"]:
+                solution_parts.append(fix["content"])
+            
+            solution_data["actual_solution"] = "\n\n".join(solution_parts)
+        else:
+            # Fallback: Look for resolution in the last comments
+            if comments:
+                last_comments = comments[-3:]  # Last 3 comments
+                for comment in reversed(last_comments):
+                    if "done" in comment.get("body", "").lower() or "fixed" in comment.get("body", "").lower():
+                        solution_data["actual_solution"] = comment.get("body", "")
+                        break
+        
+        # 5. Extract resolution field if available
+        if fields.get("resolution"):
+            resolution_name = fields.get("resolution", {}).get("name", "")
+            resolution_desc = fields.get("resolution", {}).get("description", "")
+            if resolution_desc:
+                solution_data["actual_solution"] += f"\n\nResolution Type: {resolution_name}\n{resolution_desc}"
+        
+        return solution_data
+    
+    def _extract_specific_fixes(self, comment_text: str, solution_data: Dict[str, Any]):
+        """Extract specific technical fixes from comment text"""
+        
+        # Look for code changes
+        code_patterns = [
+            r'```[\s\S]*?```',  # Markdown code blocks
+            r'`[^`]+`',         # Inline code
+            r'(changed|modified|updated)\s+\w+\.\w+',  # File changes
+            r'(set|changed|updated)\s+\w+\s*=\s*\w+',  # Configuration changes
+        ]
+        
+        for pattern in code_patterns:
+            matches = re.findall(pattern, comment_text, re.IGNORECASE)
+            solution_data["code_changes"].extend(matches)
+        
+        # Look for configuration changes
+        config_indicators = [
+            "configuration", "config", "setting", "parameter", "property",
+            "environment variable", "env var", "flag"
+        ]
+        
+        lines = comment_text.split('\n')
+        for line in lines:
+            if any(indicator in line.lower() for indicator in config_indicators):
+                solution_data["configuration_changes"].append(line.strip())
+        
+        # Extract step-by-step instructions
+        step_patterns = [
+            r'^\d+\.',      # 1. Step
+            r'^-\s',        # - Bullet point
+            r'^\*\s',       # * Bullet point
+            r'^step\s+\d+', # Step 1
+        ]
+        
+        for i, line in enumerate(lines):
+            for pattern in step_patterns:
+                if re.match(pattern, line.strip(), re.IGNORECASE):
+                    solution_data["resolution_steps"].append(line.strip())
+
+    def _build_comprehensive_prompt_with_solution(self, ticket_id: str, ticket_data: Dict[str, Any], 
+                                                solution_data: Dict[str, Any], 
+                                                enhanced_context: Dict[str, Any],
+                                                refinement_suggestion: str = None) -> str:
+        """Build prompt that focuses on the ACTUAL solution implemented"""
+        
+        fields = ticket_data.get("fields", {})
+        summary = fields.get("summary", "No summary")
+        
+        prompt = f"""You are creating a knowledge article about how a specific issue was ACTUALLY RESOLVED.
+
+IMPORTANT: This article should document WHAT WAS ACTUALLY DONE to fix the issue, not generic advice!
+
+TICKET INFORMATION:
+- Ticket ID: {ticket_id}
+- Summary: {summary}
+- Status: RESOLVED/DONE
+
+PROBLEM THAT WAS ENCOUNTERED:
+{solution_data['problem_description']}
+
+ACTUAL SOLUTION IMPLEMENTED:
+{solution_data['actual_solution'] if solution_data['actual_solution'] else 'No explicit solution found in comments - please derive from context'}
+
+SPECIFIC FIXES APPLIED:
+- Code Changes: {', '.join(solution_data['code_changes'][:5]) if solution_data['code_changes'] else 'None documented'}
+- Configuration Changes: {', '.join(solution_data['configuration_changes'][:3]) if solution_data['configuration_changes'] else 'None documented'}
+- Who Fixed It: {solution_data['who_fixed']}
+- When Fixed: {solution_data['when_fixed']}
+
+RESOLUTION STEPS TAKEN:
+{chr(10).join(solution_data['resolution_steps']) if solution_data['resolution_steps'] else 'No explicit steps documented'}
+
+ADDITIONAL CONTEXT FROM COMMENTS:
+{chr(10).join([f"- {fix['author']} ({fix['date']}): {fix['content'][:200]}..." for fix in solution_data['fix_details'][:3]])}
+
+Create a comprehensive article with these sections:
+
+1. **Problem Overview** - What issue was encountered (be specific about {summary})
+2. **Root Cause Analysis** - What caused this issue (if mentioned in comments)
+3. **Solution Implementation** - EXACTLY what was done to fix it (USE THE ACTUAL SOLUTION DATA!)
+4. **Technical Details** - Include any code changes, configurations, or commands used
+5. **Verification Steps** - How the fix was verified to work
+6. **Business Impact** - What was the impact of this fix
+7. **Related Knowledge** - Similar issues that might benefit from this solution
+8. **Preventive Measures** - How to prevent this issue in the future
+9. **Next Steps** - Any follow-up actions or monitoring needed
+
+CRITICAL REQUIREMENTS:
+- Document WHAT WAS ACTUALLY DONE, not what COULD be done
+- Include specific technical details from the comments
+- If code or configuration changes were made, include them
+- Make this a record of the ACTUAL RESOLUTION, not a generic guide
+
+Write in professional Markdown format."""
+
+        if refinement_suggestion:
+            prompt += f"\n\nREFINEMENT REQUEST:\n{refinement_suggestion}"
+
+        return prompt
+
+    def _generate_article(self) -> Dict[str, Any]:
+        """Generate article based on ACTUAL ticket resolution"""
+        ticket_id = self.mental_state.beliefs["ticket_id"]
+        refinement_suggestion = self.mental_state.beliefs.get("refinement_suggestion")
+        human_feedback = self.mental_state.beliefs.get("human_feedback")
+        article_version = self.mental_state.beliefs.get("article_version", 1)
+        
+        self.log(f"[GENERATION] Generating article v{article_version} for resolved ticket: {ticket_id}")
+        
+        # Get ticket data with full details
+        project_id = ticket_id.split('-')[0] if '-' in ticket_id else "PROJ123"
+        
+        # CRITICAL FIX: Clear cache to force fresh data load
+        self.log(f"[CACHE] Clearing cache for project {project_id} to get latest comments")
+        
+        # Clear all cached data for this project
+        if self.shared_memory.redis_client:
+            cache_patterns = [
+                f"tickets:{project_id}",
+                f"jira_api_data:{project_id}:*",
+                f"filtered_tickets:{project_id}:*",
+                f"jira_raw_data:*"
+            ]
+            
+            for pattern in cache_patterns:
+                for key in self.shared_memory.redis_client.scan_iter(match=pattern):
+                    self.shared_memory.redis_client.delete(key)
+                    self.log(f"[CACHE] Deleted cache key: {key}")
+        
+        # CRITICAL: Force fresh data load
+        jira_result = self.jira_data_agent.run({
+            "project_id": project_id,
+            "force_fresh": True,  # Add flag to force fresh load
+            "workflow_context": "article_generation"  # This triggers fresh load in JiraDataAgent
+        })
+        
+        all_tickets = jira_result.get("tickets", [])
+        target_ticket = None
+        
+        self.log(f"[DATA] Loaded {len(all_tickets)} fresh tickets from project {project_id}")
+        
+        for ticket in all_tickets:
+            if ticket.get("key") == ticket_id:
+                target_ticket = ticket
+                # Log comment count to verify fresh data
+                comments = ticket.get("fields", {}).get("comment", {}).get("comments", [])
+                self.log(f"[DATA] Found ticket {ticket_id} with {len(comments)} comments (fresh data)")
+                break
+        
+        if not target_ticket:
+            self.log(f"[ERROR] Could not find ticket {ticket_id}")
+            return self._create_fallback_article(ticket_id)
+        
+        # CRITICAL: Extract the actual solution from the ticket
+        solution_data = self._extract_solution_from_ticket(target_ticket)
+        
+        if not solution_data["actual_solution"] and not solution_data["fix_details"]:
+            self.log(f"[WARNING] No explicit solution found in ticket {ticket_id} - will try to derive from context")
+        
+        # Check if we need collaboration for additional context
+        assessment = self._assess_collaboration_needs()
+        enhanced_context = {}
+        
+        if assessment.get("needs_collaboration", True):
+            self.log("[DECISION] Collaboration needed for comprehensive article")
+            enhanced_context = self._coordinate_with_agents(assessment)
+        
+        # Build prompt with actual solution data
+        prompt = self._build_comprehensive_prompt_with_solution(
+            ticket_id, 
+            target_ticket,
+            solution_data,
+            enhanced_context, 
+            refinement_suggestion
+        )
+        
+        try:
+            # Generate article content
+            content = self.model_manager.generate_response(
+                prompt=prompt,
+                context={
+                    "agent_name": self.name,
+                    "task_type": "article_generation_from_resolution",
+                    "ticket_id": ticket_id,
+                    "has_actual_solution": bool(solution_data["actual_solution"]),
+                    "solution_extracted": True,
+                    "article_version": article_version
+                }
+            )
+            
+            self.log(f"✅ Generated article based on actual resolution")
+            
+            # Create article with metadata
+            article = {
+                "content": content,
+                "status": "draft",
+                "title": f"Know-How: {ticket_id} - {target_ticket.get('fields', {}).get('summary', 'Resolution Guide')}",
+                "created_at": datetime.now().isoformat(),
+                "last_modified": datetime.now().isoformat(),
+                "version": article_version,
+                "approval_status": "pending",
+                "feedback_history": [],
+                "solution_metadata": {
+                    "has_explicit_solution": bool(solution_data["actual_solution"]),
+                    "solution_source": "ticket_comments" if solution_data["fix_details"] else "derived",
+                    "who_fixed": solution_data["who_fixed"],
+                    "when_fixed": solution_data["when_fixed"],
+                    "code_changes_found": len(solution_data["code_changes"]),
+                    "config_changes_found": len(solution_data["configuration_changes"])
+                },
+                "collaboration_enhanced": bool(enhanced_context.get("collaboration_successful")),
+                "quality_indicators": {
+                    "based_on_actual_resolution": True,
+                    "solution_extracted": bool(solution_data["actual_solution"]),
+                    "technical_details_included": bool(solution_data["code_changes"] or solution_data["configuration_changes"])
+                }
+            }
+            
+            # Store version
+            self._store_article_version(ticket_id, article_version, article)
+            
+            return article
+            
+        except Exception as e:
+            self.log(f"[ERROR] Article generation failed: {e}")
+            return self._create_fallback_article(ticket_id)
 
     def _detect_query_type(self, query: str) -> QueryType:
         if not query:
@@ -688,40 +1012,37 @@ class JiraArticleGeneratorAgent(BaseAgent):
         return None
 
     def _act(self) -> Dict[str, Any]:
-        """YOUR EXISTING METHOD - WITH MINOR ENHANCEMENT FOR FEEDBACK"""
+        """Generate article and return immediately - NO LOOPS"""
         try:
-            # Generate article with collaboration (and now feedback support)
+            project_id = self.mental_state.get_belief("current_project") or ""
+            workflow_context = self.mental_state.get_belief("workflow_context")
+            force_fresh = self.mental_state.get_belief("force_fresh")
+            # Generate article
             article = self._generate_article()
             
-            # Autonomous evaluation and refinement (keeping your existing logic)
-            self.log("[EVALUATION] Performing autonomous evaluation")
-            evaluation_input = {"article": article}
-            evaluation_result = self.knowledge_base_agent.run(evaluation_input)
+            # CRITICAL: For article generation, always force fresh data
+            is_article_generation = (
+                workflow_context == "article_generation" or
+                force_fresh == True
+            )
             
-            redundant = evaluation_result.get("redundant", False)
-            refinement_suggestion = evaluation_result.get("refinement_suggestion")
-            
-            # Autonomous refinement if needed and not already done
-            if refinement_suggestion and not self.mental_state.beliefs.get("autonomous_refinement_done", False):
-                self.log(f"[REFINEMENT] Applying refinement: {refinement_suggestion}")
+            if is_article_generation:
+                self.log("[ACTION] Article generation context - forcing fresh data load")
+                # Clear cache to force fresh load
+                tickets_key = f"tickets:{project_id}"
+                self.redis_client.delete(tickets_key)
                 
-                self.mental_state.beliefs["refinement_suggestion"] = refinement_suggestion
-                self.mental_state.beliefs["autonomous_refinement_done"] = True
-                
-                refined_article = self._generate_article()
-                article = refined_article
-                self.log("[REFINEMENT] Article refined successfully")
-            
-            # Extract collaboration metadata
-            collaboration_metadata = article.get("collaboration_metadata", {})
-            collaboration_enhanced = article.get("collaboration_enhanced", False)
-            
+                # Also clear any filtered ticket caches
+                pattern = f"filtered_tickets:{project_id}:*"
+                for key in self.redis_client.scan_iter(match=pattern):
+                    self.redis_client.delete(key)
+            # Return immediately with success
             return {
                 "article": article,
                 "workflow_status": "success",
-                "autonomous_refinement_done": self.mental_state.beliefs.get("autonomous_refinement_done", False),
-                "collaboration_metadata": collaboration_metadata,
-                "collaboration_applied": collaboration_enhanced
+                "workflow_completed": True,  # Signal workflow completion
+                "autonomous_refinement_done": False,  # Skip autonomous refinement to prevent loops
+                "collaboration_metadata": article.get("collaboration_metadata", {})
             }
             
         except Exception as e:
@@ -729,6 +1050,7 @@ class JiraArticleGeneratorAgent(BaseAgent):
             return {
                 "article": self._create_fallback_article(self.mental_state.beliefs.get("ticket_id", "UNKNOWN")),
                 "workflow_status": "failure",
+                "workflow_completed": True,  # Still mark as completed to prevent loops
                 "error": str(e),
                 "autonomous_refinement_done": False,
                 "collaboration_applied": False

@@ -1,3 +1,4 @@
+import json
 import re
 import sys
 import os
@@ -1077,85 +1078,39 @@ class Orchestrator:
         return final_state
     
     def _build_jira_workflow(self):
+        """FIXED: Simple workflow that runs once and stops"""
         workflow = StateGraph(JurixState)
         
+        # Only two nodes - generate and validate
         workflow.add_node("jira_article_generator", self._jira_article_generator_node)
         workflow.add_node("knowledge_base", self._knowledge_base_node)
 
+        # Start with article generation
         workflow.set_entry_point("jira_article_generator")
 
         def route(state: JurixState) -> str:
-            logger.info(f"[ROUTING] Current workflow state analysis:")
-            logger.info(f"  - Workflow status: {state.get('workflow_status')}")
-            logger.info(f"  - Workflow stage: {state.get('workflow_stage')}")
-            logger.info(f"  - Has article: {bool(state.get('article'))}")
-            logger.info(f"  - Has refined: {state.get('has_refined', False)}")
-            logger.info(f"  - Refinement suggestion: {bool(state.get('refinement_suggestion'))}")
+            """Simple routing - generate once, validate once, then END"""
+            logger.info(f"[ROUTING] Current state: {state.get('workflow_stage')}")
             
-            if (state.get("workflow_status") == "failure" or 
-                not state.get("article") or 
-                state["article"].get("status") == "error"):
-                
-                state["workflow_stage"] = "terminated_failure"
-                state["workflow_history"].append({
-                    "step": "workflow_terminated",
-                    "article": state["article"],
-                    "redundant": state["redundant"],
-                    "refinement_suggestion": state["refinement_suggestion"],
-                    "workflow_status": state["workflow_status"],
-                    "workflow_stage": state["workflow_stage"],
-                    "recommendation_id": state["recommendation_id"],
-                    "recommendations": state["recommendations"],
-                    "autonomous_refinement_done": state.get("autonomous_refinement_done", False),
-                    "collaboration_metadata": state.get("collaboration_metadata", {}),
-                    "termination_reason": "critical_failure"
-                })
+            # If article generation failed, end immediately
+            if state.get("workflow_status") == "failure":
+                logger.info("[ROUTING] Article generation failed - ending workflow")
                 return END
             
-            if state.get("workflow_stage") in ["article_generated", "article_refined"]:
+            # If we just generated the article, validate it once
+            if state.get("workflow_stage") == "article_generated":
+                logger.info("[ROUTING] Article generated - going to validation")
                 return "knowledge_base"
             
-            elif state.get("workflow_stage") == "knowledge_base_evaluated":
-                if state.get("refinement_suggestion") and not state.get("has_refined", False):
-                    return "jira_article_generator"
-                else:
-                    state["workflow_stage"] = "waiting_for_approval"
-                    state["workflow_history"].append({
-                        "step": "waiting_for_approval",
-                        "article": state["article"],
-                        "redundant": state["redundant"],
-                        "refinement_suggestion": state["refinement_suggestion"],
-                        "workflow_status": state["workflow_status"],
-                        "workflow_stage": state["workflow_stage"],
-                        "recommendation_id": state["recommendation_id"],
-                        "recommendations": state["recommendations"],
-                        "autonomous_refinement_done": state.get("autonomous_refinement_done", False),
-                        "collaboration_metadata": state.get("collaboration_metadata", {}),
-                        "awaiting_human_approval": True
-                    })
-                    return END
-            
-            if state.get("approved", False):
-                state["workflow_stage"] = "complete"
-                state["workflow_history"].append({
-                    "step": "approval_submitted",
-                    "article": state["article"],
-                    "redundant": state["redundant"],
-                    "refinement_suggestion": state["refinement_suggestion"],
-                    "approved": state["approved"],
-                    "workflow_status": state["workflow_status"],
-                    "workflow_stage": state["workflow_stage"],
-                    "recommendation_id": state["recommendation_id"],
-                    "recommendations": state["recommendations"],
-                    "autonomous_refinement_done": state.get("autonomous_refinement_done", False),
-                    "collaboration_metadata": state.get("collaboration_metadata", {}),
-                    "human_approved": True
-                })
-            
+            # After validation, always end
+            logger.info("[ROUTING] Validation complete - ending workflow")
             return END
 
+        # Simple linear flow
         workflow.add_conditional_edges("jira_article_generator", route)
-        workflow.add_conditional_edges("knowledge_base", route)
+        
+        # Knowledge base always goes to END
+        workflow.add_edge("knowledge_base", END)
 
         return workflow.compile()
     
@@ -1239,9 +1194,11 @@ class Orchestrator:
         return recommendation_id
     
     def _jira_article_generator_node(self, state: JurixState) -> JurixState:
+        """FIXED: Generate article once and mark completion"""
         input_data = {
             "ticket_id": state["ticket_id"],
             "refinement_suggestion": state.get("refinement_suggestion"),
+            "project_id": state.get("project", "PROJ123")
         }
         
         result = self.jira_article_generator.run(input_data)
@@ -1249,107 +1206,41 @@ class Orchestrator:
         updated_state = state.copy()
         updated_state["article"] = result.get("article", {})
         updated_state["workflow_status"] = result.get("workflow_status", "failure")
-        updated_state["autonomous_refinement_done"] = result.get("autonomous_refinement_done", False)
+        updated_state["workflow_stage"] = "article_generated"  # Mark as generated
+        updated_state["workflow_completed"] = True  # Prevent re-execution
         
-        collaboration_metadata = result.get("collaboration_metadata", {})
-        if collaboration_metadata:
-            updated_state["collaboration_metadata"] = collaboration_metadata
-            updated_state["final_collaboration_summary"] = collaboration_metadata
-        
-        if state.get("refinement_suggestion") is not None:
-            updated_state["has_refined"] = True
-            updated_state["workflow_stage"] = "article_refined"
-        else:
-            updated_state["has_refined"] = False
-            updated_state["workflow_stage"] = "article_generated"
-        
-        updated_state["iteration_count"] = state.get("iteration_count", 0) + 1
-        
-        history_entry = {
-            "step": "initial_generation" if not updated_state["has_refined"] else "manual_refinement",
-            "article": updated_state["article"],
-            "redundant": updated_state.get("redundant", False),
-            "refinement_suggestion": updated_state.get("refinement_suggestion"),
-            "workflow_status": updated_state["workflow_status"],
-            "workflow_stage": updated_state["workflow_stage"],
-            "recommendation_id": updated_state["recommendation_id"],
-            "recommendations": updated_state["recommendations"],
-            "autonomous_refinement_done": updated_state["autonomous_refinement_done"],
-            "collaboration_metadata": collaboration_metadata,
-            "collaboration_applied": bool(collaboration_metadata.get("collaborating_agents"))
-        }
-        updated_state["workflow_history"].append(history_entry)
+        # Store the article immediately
+        if result.get("article"):
+            article_key = f"article_draft:{state['ticket_id']}"
+            self.shared_memory.redis_client.set(
+                article_key, 
+                json.dumps(result["article"])
+            )
+            self.shared_memory.redis_client.expire(article_key, 86400)  # 24 hours
+            logger.info(f"✅ Article stored in Redis: {article_key}")
         
         return updated_state
     
     def _knowledge_base_node(self, state: JurixState) -> JurixState:
+        """FIXED: Validate once and provide feedback, no loops"""
         input_data = {
             "article": state["article"],
-            "validation_context": "comprehensive_quality_assurance",
-            "previous_collaboration": state.get("collaboration_metadata", {})
+            "validation_context": "final_validation"
         }
         
         result = self.knowledge_base.run(input_data)
         
         updated_state = state.copy()
         updated_state["redundant"] = result.get("redundant", False)
+        updated_state["refinement_suggestion"] = result.get("refinement_suggestion")
+        updated_state["workflow_status"] = "completed"  # Mark as completed
+        updated_state["workflow_stage"] = "validation_complete"
         
-        if not state.get("has_refined", False):
-            kb_suggestion = result.get("refinement_suggestion")
-            
-            if not kb_suggestion or len(kb_suggestion) < 50:
-                collaboration_applied = bool(state.get("collaboration_metadata", {}).get("collaborating_agents"))
-                
-                if collaboration_applied:
-                    updated_state["refinement_suggestion"] = (
-                        "Enhance the article by adding specific technical implementation details, "
-                        "including code examples where applicable, quantifiable metrics showing the impact "
-                        "of the resolution, and a detailed timeline of the resolution process. "
-                        "Also expand the 'Related Knowledge' section with specific references to similar "
-                        "issues and their resolution patterns."
-                    )
-                else:
-                    updated_state["refinement_suggestion"] = (
-                        "Significantly enhance the article by adding comprehensive technical details, "
-                        "specific performance metrics before and after the resolution, detailed step-by-step "
-                        "implementation instructions, code examples, and strategic recommendations for "
-                        "preventing similar issues. Include a troubleshooting section for common variations."
-                    )
-            else:
-                updated_state["refinement_suggestion"] = kb_suggestion
-                
-            updated_state["refinement_count"] = 1
-        else:
-            updated_state["refinement_suggestion"] = None
-            updated_state["refinement_count"] = state.get("refinement_count", 0)
+        # Important: Don't trigger any refinement loops
+        updated_state["needs_refinement"] = False
+        updated_state["workflow_completed"] = True
         
-        updated_state["workflow_status"] = result.get("workflow_status", "failure")
-        updated_state["iteration_count"] = state.get("iteration_count", 0) + 1
-        updated_state["workflow_stage"] = "knowledge_base_evaluated"
-        
-        existing_collab = updated_state.get("collaboration_metadata", {})
-        new_collab = result.get("collaboration_metadata", {})
-        
-        if existing_collab or new_collab:
-            merged_collab = self._merge_collaboration_metadata(updated_state, new_collab)
-            merged_collab["validation_completed"] = True
-            updated_state["collaboration_metadata"] = merged_collab
-            updated_state["final_collaboration_summary"] = merged_collab
-        
-        history_entry = {
-            "step": "knowledge_base_evaluation" if not state.get("has_refined", False) else "final_knowledge_base_evaluation",
-            "article": updated_state["article"],
-            "redundant": updated_state.get("redundant", False),
-            "refinement_suggestion": updated_state["refinement_suggestion"],
-            "workflow_status": updated_state["workflow_status"],
-            "workflow_stage": updated_state["workflow_stage"],
-            "recommendation_id": updated_state["recommendation_id"],
-            "recommendations": updated_state["recommendations"],
-            "autonomous_refinement_done": updated_state.get("autonomous_refinement_done", False),
-            "collaboration_metadata": updated_state.get("collaboration_metadata", {}),
-            "validation_quality": "enhanced"
-        }
-        updated_state["workflow_history"].append(history_entry)
+        logger.info("✅ Validation complete - workflow ending")
         
         return updated_state
     
