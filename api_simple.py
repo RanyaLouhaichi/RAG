@@ -1439,11 +1439,14 @@ def submit_article_feedback(ticket_id):
             # PUBLISH TO CONFLUENCE
             logger.info(f"📚 Publishing approved article to Confluence space: {project_key}")
             
-            # Get the enhanced retrieval agent (with RAG pipeline)
-            if hasattr(orchestrator, 'enhanced_retrieval_agent'):
-                rag_pipeline = orchestrator.enhanced_retrieval_agent.rag_pipeline
+            try:
+                # Ensure enhanced RAG is enabled
+                if not hasattr(orchestrator, 'enhanced_retrieval_agent'):
+                    logger.info("Enabling enhanced RAG for publishing...")
+                    orchestrator.enable_enhanced_rag()
                 
-                publish_result = rag_pipeline.publish_article_to_confluence(
+                # Use the orchestrator's delegation method
+                publish_result = orchestrator.publish_article_to_confluence(
                     article=current_article,
                     ticket_id=ticket_id,
                     project_key=project_key
@@ -1456,26 +1459,35 @@ def submit_article_feedback(ticket_id):
                     current_article["published_to_confluence"] = True
                     
                     logger.info(f"✅ Published to Confluence: {publish_result['page_url']}")
+                    
+                    # Store final version
+                    final_key = f"article_approved:{ticket_id}"
+                    orchestrator.shared_memory.redis_client.set(
+                        final_key,
+                        json.dumps(current_article)
+                    )
+                    orchestrator.shared_memory.redis_client.expire(final_key, 86400 * 30)  # 30 days
+                    
+                    return jsonify({
+                        "status": "success",
+                        "message": "Article approved and published to Confluence!",
+                        "article": current_article,
+                        "confluence_url": current_article.get("confluence_url"),
+                        "next_step": "view_in_confluence"
+                    })
                 else:
                     logger.error(f"❌ Failed to publish to Confluence: {publish_result.get('error')}")
-            else:
-                logger.warning("Enhanced RAG not enabled - cannot publish to Confluence")
-            
-            # Store final version
-            final_key = f"article_approved:{ticket_id}"
-            orchestrator.shared_memory.redis_client.set(
-                final_key,
-                json.dumps(current_article)
-            )
-            orchestrator.shared_memory.redis_client.expire(final_key, 86400 * 30)  # 30 days
-            
-            return jsonify({
-                "status": "success",
-                "message": "Article approved and published to Confluence!",
-                "article": current_article,
-                "confluence_url": current_article.get("confluence_url"),
-                "next_step": "view_in_confluence"
-            })
+                    return jsonify({
+                        "status": "error",
+                        "error": f"Failed to publish to Confluence: {publish_result.get('error')}"
+                    }), 500
+                    
+            except Exception as e:
+                logger.error(f"❌ Error during publishing: {e}", exc_info=True)
+                return jsonify({
+                    "status": "error",
+                    "error": f"Publishing error: {str(e)}"
+                }), 500
             
         elif action == "reject":
             # Mark as rejected

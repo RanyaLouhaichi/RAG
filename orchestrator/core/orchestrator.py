@@ -450,160 +450,24 @@ class Orchestrator:
         
         return updated_state
     
-    def publish_article_to_confluence(self, 
-                                    article: Dict[str, Any], 
-                                    ticket_id: str,
-                                    project_key: str) -> Dict[str, Any]:
-        """Publish an approved article to Confluence"""
+    def publish_article_to_confluence(self, article: Dict[str, Any], ticket_id: str, project_key: str) -> Dict[str, Any]:
+        """Delegate article publishing to the RAG pipeline"""
         try:
-            # Determine space key from project
-            space_key = project_key  # Or map to specific space if different
+            if not hasattr(self, 'enhanced_retrieval_agent'):
+                self.logger.error("Enhanced RAG not enabled. Call enable_enhanced_rag() first")
+                return {"status": "error", "error": "Enhanced RAG not enabled"}
             
-            # Create page content in Confluence storage format
-            content_html = self._markdown_to_confluence_html(article['content'])
-            
-            # Create the page
-            url = f"{self.confluence_extractor.confluence_url}/rest/api/content"
-            
-            page_data = {
-                "type": "page",
-                "title": f"{ticket_id} - {article.get('title', 'Resolution Guide')}",
-                "space": {"key": space_key},
-                "body": {
-                    "storage": {
-                        "value": content_html,
-                        "representation": "storage"
-                    }
-                },
-                "metadata": {
-                    "labels": [
-                        {"name": "jurix-generated"},
-                        {"name": f"ticket-{ticket_id}"},
-                        {"name": "knowledge-article"}
-                    ]
-                }
-            }
-            
-            response = requests.post(
-                url, 
-                json=page_data,
-                auth=self.confluence_extractor.auth,
-                headers={'Content-Type': 'application/json'},
-                verify=False
+            # Delegate to the RAG pipeline
+            return self.enhanced_retrieval_agent.rag_pipeline.publish_article_to_confluence(
+                article=article,
+                ticket_id=ticket_id,
+                project_key=project_key
             )
-            
-            if response.status_code == 200:
-                page_info = response.json()
-                page_id = page_info['id']
-                page_url = f"{self.confluence_extractor.confluence_url}/pages/viewpage.action?pageId={page_id}"
-                
-                self.logger.info(f"✅ Published article to Confluence: {page_url}")
-                
-                # Now ingest this document into the RAG system
-                confluence_doc = {
-                    'id': f"confluence_{page_id}",
-                    'title': page_info['title'],
-                    'content': article['content'],
-                    'space_key': space_key,
-                    'created_date': datetime.now().isoformat(),
-                    'url': page_url,
-                    'metadata': {
-                        'source': 'jurix_generated',
-                        'ticket_id': ticket_id,
-                        'auto_published': True
-                    }
-                }
-                
-                # Ingest into RAG
-                self.ingest_document(confluence_doc)
-                
-                # Create the ticket relationship in Neo4j
-                self._create_article_ticket_relationship(
-                    doc_id=f"confluence_{page_id}",
-                    ticket_id=ticket_id,
-                    page_url=page_url
-                )
-                
-                return {
-                    "status": "success",
-                    "page_id": page_id,
-                    "page_url": page_url,
-                    "doc_id": f"confluence_{page_id}"
-                }
-            else:
-                self.logger.error(f"Failed to publish: {response.text}")
-                return {
-                    "status": "error",
-                    "error": response.text
-                }
-                
-        except Exception as e:
-            self.logger.error(f"Error publishing to Confluence: {e}")
-            return {
-                "status": "error",
-                "error": str(e)
-            }
-
-    def _markdown_to_confluence_html(self, markdown_content: str) -> str:
-        """Convert markdown to Confluence storage format"""
-        import markdown
-        
-        # Basic conversion
-        html = markdown.markdown(markdown_content)
-        
-        # Convert some markdown elements to Confluence macros
-        # Headers
-        html = re.sub(r'<h1>(.*?)</h1>', r'<h1>\1</h1>', html)
-        html = re.sub(r'<h2>(.*?)</h2>', r'<h2>\1</h2>', html)
-        
-        # Code blocks - convert to Confluence code macro
-        html = re.sub(
-            r'<pre><code class="language-(\w+)">(.*?)</code></pre>',
-            r'<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">\1</ac:parameter><ac:plain-text-body><![CDATA[\2]]></ac:plain-text-body></ac:structured-macro>',
-            html,
-            flags=re.DOTALL
-        )
-        
-        # Info panels
-        html = re.sub(
-            r'<blockquote>(.*?)</blockquote>',
-            r'<ac:structured-macro ac:name="info"><ac:rich-text-body>\1</ac:rich-text-body></ac:structured-macro>',
-            html,
-            flags=re.DOTALL
-        )
-        
-        return html
-
-    def _create_article_ticket_relationship(self, doc_id: str, ticket_id: str, page_url: str):
-        """Create RESOLVES relationship between article and ticket in Neo4j"""
-        try:
-            # Add the relationship with high confidence
-            self.neo4j_manager.link_document_to_ticket(
-                doc_id=doc_id,
-                ticket_key=ticket_id,
-                relationship_type="RESOLVES",
-                confidence=1.0,
-                metadata={
-                    "auto_generated": True,
-                    "published_date": datetime.now().isoformat(),
-                    "confluence_url": page_url
-                }
-            )
-            
-            # Also update the ticket to mark it as having documentation
-            self.neo4j_manager.update_ticket_metadata(
-                ticket_key=ticket_id,
-                metadata={
-                    "has_documentation": True,
-                    "documentation_url": page_url,
-                    "documentation_id": doc_id
-                }
-            )
-            
-            self.logger.info(f"✅ Created RESOLVES relationship: {ticket_id} -> {doc_id}")
             
         except Exception as e:
-            self.logger.error(f"Failed to create relationship: {e}")
+            self.logger.error(f"Failed to publish article: {e}", exc_info=True)
+            return {"status": "error", "error": str(e)}
+
     
     def _collaborative_recommendation_node(self, state: JurixState) -> JurixState:
         def run_collaboration():

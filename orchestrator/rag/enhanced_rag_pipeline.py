@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 from typing import Dict, Any, List, Optional, Tuple
@@ -71,6 +72,8 @@ class EnhancedRAGPipeline:
         
         self.logger.info(f"Ingestion complete. Processed {len(documents)} documents")
     
+    # In orchestrator/rag/enhanced_rag_pipeline.py, update the ingest_document method:
+
     def ingest_document(self, document: Dict[str, Any]):
         """Ingest a single document with all enhancements"""
         doc_id = document['id']
@@ -89,17 +92,25 @@ class EnhancedRAGPipeline:
             f"{document['title']} {document['content'][:1000]}"
         )
         
-        # Store document-level embedding
+        # Store document-level embedding - flatten metadata for ChromaDB
+        doc_metadata = {
+            'doc_id': doc_id,
+            'title': document['title'],
+            'space_key': document.get('space_key', ''),
+            'type': 'document',
+            'created_date': document.get('created_date', datetime.now().isoformat())
+        }
+        
+        # Add flattened metadata fields
+        if document.get('metadata'):
+            for key, value in document['metadata'].items():
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    doc_metadata[f'meta_{key}'] = value
+        
         self.doc_collection.add(
             embeddings=[doc_embedding.tolist()],
             documents=[document['content'][:1000]],
-            metadatas=[{
-                'doc_id': doc_id,
-                'title': document['title'],
-                'space_key': document['space_key'],
-                'type': 'document',
-                'created_date': document['created_date']
-            }],
+            metadatas=[doc_metadata],
             ids=[doc_id]
         )
         
@@ -113,19 +124,36 @@ class EnhancedRAGPipeline:
             # Create chunk embedding
             chunk_embedding = self.chunk_embedder.encode(chunk.content)
             
+            # Flatten chunk metadata for ChromaDB
+            chunk_metadata = {
+                'chunk_id': chunk_id,
+                'doc_id': doc_id,
+                'doc_title': document['title'],
+                'chunk_index': i,
+                'quality_score': chunk.quality_score,
+                'section': chunk.metadata.get('section', 'main')
+            }
+            
+            # Add quality evaluation fields if present (flatten them)
+            quality_eval = chunk.metadata.get('quality_evaluation', {})
+            if isinstance(quality_eval, dict):
+                for key, value in quality_eval.items():
+                    if key == 'issues' and isinstance(value, list):
+                        # Join issues into a single string
+                        chunk_metadata['quality_issues'] = '; '.join(str(issue) for issue in value)
+                    elif isinstance(value, (str, int, float, bool, type(None))):
+                        chunk_metadata[f'quality_{key}'] = value
+            
+            # Add other simple metadata fields
+            for key, value in chunk.metadata.items():
+                if key not in ['quality_evaluation'] and isinstance(value, (str, int, float, bool, type(None))):
+                    chunk_metadata[key] = value
+            
             # Store in ChromaDB
             self.chunk_collection.add(
                 embeddings=[chunk_embedding.tolist()],
                 documents=[chunk.content],
-                metadatas=[{
-                    'chunk_id': chunk_id,
-                    'doc_id': doc_id,
-                    'doc_title': document['title'],
-                    'chunk_index': i,
-                    'quality_score': chunk.quality_score,
-                    'section': chunk.metadata.get('section', 'main'),
-                    **chunk.metadata
-                }],
+                metadatas=[chunk_metadata],
                 ids=[chunk_id]
             )
             
@@ -193,11 +221,13 @@ class EnhancedRAGPipeline:
         
         return all_results[:k]
     
+    # In enhanced_rag_pipeline.py, update the _combine_search_results method:
+
     def _combine_search_results(self,
-                               doc_results: Dict[str, Any],
-                               chunk_results: Dict[str, Any], 
-                               graph_results: List[Dict[str, Any]],
-                               query: str) -> List[Dict[str, Any]]:
+                            doc_results: Dict[str, Any],
+                            chunk_results: Dict[str, Any], 
+                            graph_results: List[Dict[str, Any]],
+                            query: str) -> List[Dict[str, Any]]:
         """Combine results from different sources with intelligent ranking"""
         
         combined = {}
@@ -548,77 +578,103 @@ class EnhancedRAGPipeline:
         try:
             self.logger.info(f"🔗 Creating Neo4j relationship: {ticket_id} -> {doc_id}")
             
-            # First, check if Neo4j is connected
-            if not self.neo4j_manager:
-                self.logger.error("❌ Neo4j manager not initialized!")
-                return
-                
-            # Test Neo4j connection
-            try:
-                with self.neo4j_manager.driver.session() as session:
-                    result = session.run("RETURN 1 as test")
-                    self.logger.info("✅ Neo4j connection successful")
-            except Exception as e:
-                self.logger.error(f"❌ Neo4j connection failed: {e}")
-                return
-            
-            # Ensure the ticket exists in Neo4j
-            self.logger.info(f"📝 Ensuring ticket {ticket_id} exists in Neo4j")
-            self.neo4j_manager.add_ticket(
-                ticket_key=ticket_id,
-                summary=f"Ticket {ticket_id}",
-                project_key=ticket_id.split('-')[0] if '-' in ticket_id else "PROJ",
-                status="Resolved",
-                metadata={
-                    "has_documentation": True,
-                    "documentation_url": page_url,
-                    "documentation_id": doc_id
-                }
-            )
-            self.logger.info(f"✅ Ticket {ticket_id} added/updated in Neo4j")
-            
-            # Ensure the document exists in Neo4j
-            self.logger.info(f"📄 Ensuring document {doc_id} exists in Neo4j")
-            self.neo4j_manager.add_document(
-                doc_id=doc_id,
-                title=f"{ticket_id} - Resolution Guide",
-                content="Auto-generated article from JURIX",
-                metadata={
-                    "confluence_url": page_url,
-                    "ticket_id": ticket_id,
-                    "auto_generated": True
-                }
-            )
-            self.logger.info(f"✅ Document {doc_id} added to Neo4j")
-            
-            # Create the relationship
-            self.logger.info(f"🔗 Creating RESOLVES relationship")
-            self.neo4j_manager.link_document_to_ticket(
-                doc_id=doc_id,
-                ticket_key=ticket_id,
-                relationship_type="RESOLVES",
-                confidence=1.0,
-                metadata={
-                    "auto_generated": True,
-                    "published_date": datetime.now().isoformat(),
-                    "confluence_url": page_url
-                }
-            )
-            self.logger.info(f"✅ RESOLVES relationship created: {ticket_id} -> {doc_id}")
-            
-            # Verify the relationship was created
+            # Create both nodes and the relationship in a single transaction
             with self.neo4j_manager.driver.session() as session:
-                verify_query = """
-                MATCH (t:Ticket {key: $ticket_key})-[r:RESOLVES]-(d:Document {id: $doc_id})
-                RETURN t.key as ticket, d.id as doc, type(r) as rel_type
-                """
-                result = session.run(verify_query, ticket_key=ticket_id, doc_id=doc_id)
-                record = result.single()
-                
-                if record:
-                    self.logger.info(f"✅ Verified relationship in Neo4j: {record['ticket']} -[{record['rel_type']}]-> {record['doc']}")
-                else:
-                    self.logger.error(f"❌ Relationship verification failed - not found in Neo4j")
-            
+                try:
+                    # Use a transaction for atomicity
+                    tx = session.begin_transaction()
+                    
+                    # Create or update the ticket
+                    ticket_query = """
+                    MERGE (t:Ticket {key: $ticket_key})
+                    SET t.summary = COALESCE(t.summary, $summary),
+                        t.status = 'Resolved',
+                        t.has_documentation = true,
+                        t.documentation_url = $page_url,
+                        t.documentation_id = $doc_id,
+                        t.updated_at = datetime()
+                    RETURN t
+                    """
+                    
+                    tx.run(
+                        ticket_query,
+                        ticket_key=ticket_id,
+                        summary=f"Ticket {ticket_id}",
+                        page_url=page_url,
+                        doc_id=doc_id
+                    )
+                    
+                    # Create or update the document
+                    doc_query = """
+                    MERGE (d:Document {id: $doc_id})
+                    SET d.title = $title,
+                        d.content = $content,
+                        d.source = 'confluence',
+                        d.doc_type = 'article',
+                        d.created_at = COALESCE(d.created_at, datetime()),
+                        d.updated_at = datetime(),
+                        d.metadata = $metadata
+                    RETURN d
+                    """
+                    
+                    doc_metadata = json.dumps({
+                        "confluence_url": page_url,
+                        "ticket_id": ticket_id,
+                        "auto_generated": True,
+                        "source": "jurix_generated"
+                    })
+                    
+                    tx.run(
+                        doc_query,
+                        doc_id=doc_id,
+                        title=f"{ticket_id} - Resolution Guide",
+                        content="Auto-generated article from JURIX",
+                        metadata=doc_metadata
+                    )
+                    
+                    # Create the RESOLVES relationship
+                    rel_query = """
+                    MATCH (t:Ticket {key: $ticket_key})
+                    MATCH (d:Document {id: $doc_id})
+                    MERGE (d)-[r:RESOLVES]->(t)
+                    SET r.confidence = 1.0,
+                        r.created_at = datetime(),
+                        r.auto_generated = true,
+                        r.confluence_url = $page_url
+                    RETURN r
+                    """
+                    
+                    tx.run(
+                        rel_query,
+                        ticket_key=ticket_id,
+                        doc_id=doc_id,
+                        page_url=page_url
+                    )
+                    
+                    # Commit the transaction
+                    tx.commit()
+                    self.logger.info(f"✅ Transaction committed - relationship created")
+                    
+                    # Verify the relationship
+                    verify_query = """
+                    MATCH (d:Document {id: $doc_id})-[r:RESOLVES]->(t:Ticket {key: $ticket_key})
+                    RETURN count(r) as rel_count
+                    """
+                    result = session.run(verify_query, doc_id=doc_id, ticket_key=ticket_id)
+                    record = result.single()
+                    
+                    if record and record["rel_count"] > 0:
+                        self.logger.info(f"✅ VERIFIED: Relationship exists in Neo4j")
+                        return True
+                    else:
+                        self.logger.error(f"❌ Relationship verification failed")
+                        return False
+                        
+                except Exception as e:
+                    tx.rollback()
+                    self.logger.error(f"❌ Transaction failed: {e}", exc_info=True)
+                    raise
+                    
         except Exception as e:
             self.logger.error(f"❌ Failed to create relationship: {e}", exc_info=True)
+            return False
