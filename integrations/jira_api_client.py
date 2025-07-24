@@ -108,7 +108,7 @@ class JiraAPIClient:
             "startAt": start_at,
             "maxResults": max_results,
             "expand": "changelog,renderedFields,transitions",  # Add transitions
-            "fields": "*all,-comment"  # Get all fields except comments (can be large)
+            "fields": "*all,comment"  
         }
         
         self.logger.info(f"Searching issues with JQL: {jql}")

@@ -1,6 +1,7 @@
 # api_simple.py - Enhanced backend API with complete dashboard integration
 from collections import defaultdict
 import json
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
@@ -20,6 +21,17 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from orchestrator.core.orchestrator import orchestrator # type: ignore
 from integrations.api_config import APIConfig
 from integrations.jira_api_client import JiraAPIClient
+
+# Force reload .env
+load_dotenv(override=True)
+
+# Debug print
+print("=" * 50)
+print("DEBUG: Environment Variables")
+print(f"JIRA_URL from env: {os.getenv('JIRA_URL')}")
+print(f"Current working directory: {os.getcwd()}")
+print(f".env file exists: {os.path.exists('.env')}")
+print("=" * 50) 
 
 class DashboardUpdateTracker:
     """Track dashboard updates for real-time notifications"""

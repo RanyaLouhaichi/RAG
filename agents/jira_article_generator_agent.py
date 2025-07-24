@@ -64,8 +64,10 @@ class JiraArticleGeneratorAgent(BaseAgent):
         
         fields = ticket.get("fields", {})
         
-        # 1. Extract problem from description
-        solution_data["problem_description"] = fields.get("summary", "") + "\n" + fields.get("description", "")
+        # 1. Extract problem from description - FIX NULL SAFETY
+        summary = fields.get("summary") or ""
+        description = fields.get("description") or ""
+        solution_data["problem_description"] = f"{summary}\n{description}" if summary or description else "No description available"
         
         # 2. CRITICAL: Extract solution from comments
         comments = fields.get("comment", {}).get("comments", [])
@@ -180,192 +182,106 @@ class JiraArticleGeneratorAgent(BaseAgent):
                     solution_data["resolution_steps"].append(line.strip())
 
     def _build_comprehensive_prompt_with_solution(self, ticket_id: str, ticket_data: Dict[str, Any], 
-                                                solution_data: Dict[str, Any], 
-                                                enhanced_context: Dict[str, Any],
-                                                refinement_suggestion: str = None) -> str:
+                                            solution_data: Dict[str, Any], 
+                                            enhanced_context: Dict[str, Any],
+                                            refinement_suggestion: str = None) -> str:
         """Build prompt that focuses on the ACTUAL solution implemented"""
         
         fields = ticket_data.get("fields", {})
         summary = fields.get("summary", "No summary")
         
+        # ENSURE solution_data has all required fields
+        if not solution_data:
+            solution_data = {
+                "problem_description": "",
+                "actual_solution": "",
+                "fix_details": [],
+                "code_changes": [],
+                "configuration_changes": [],
+                "resolution_steps": [],
+                "who_fixed": "",
+                "when_fixed": "",
+            }
+        
+        # Build safe strings
+        problem_desc = solution_data.get('problem_description') or 'No problem description available'
+        actual_solution = solution_data.get('actual_solution') or 'No explicit solution found in comments - please derive from context'
+        who_fixed = solution_data.get('who_fixed') or 'Unknown'
+        when_fixed = solution_data.get('when_fixed') or 'Unknown'
+        
+        # Safe list handling
+        code_changes = solution_data.get('code_changes', [])
+        code_changes_str = ', '.join(str(c) for c in code_changes[:5]) if code_changes else 'None documented'
+        
+        config_changes = solution_data.get('configuration_changes', [])
+        config_changes_str = ', '.join(str(c) for c in config_changes[:3]) if config_changes else 'None documented'
+        
+        resolution_steps = solution_data.get('resolution_steps', [])
+        resolution_steps_str = '\n'.join(str(s) for s in resolution_steps) if resolution_steps else 'No explicit steps documented'
+        
+        # Build fix details section safely
+        fix_details_section = ""
+        fix_details = solution_data.get('fix_details', [])
+        if fix_details:
+            for fix in fix_details[:3]:
+                if isinstance(fix, dict):
+                    author = fix.get('author', 'Unknown')
+                    date = fix.get('date', 'Unknown')
+                    content = (fix.get('content') or '')[:200]
+                    fix_details_section += f"\n- {author} ({date}): {content}..."
+        else:
+            fix_details_section = "\nNo additional comment details available"
+        
         prompt = f"""You are creating a knowledge article about how a specific issue was ACTUALLY RESOLVED.
 
-IMPORTANT: This article should document WHAT WAS ACTUALLY DONE to fix the issue, not generic advice!
+    IMPORTANT: This article should document WHAT WAS ACTUALLY DONE to fix the issue, not generic advice!
 
-TICKET INFORMATION:
-- Ticket ID: {ticket_id}
-- Summary: {summary}
-- Status: RESOLVED/DONE
+    TICKET INFORMATION:
+    - Ticket ID: {ticket_id}
+    - Summary: {summary}
+    - Status: RESOLVED/DONE
 
-PROBLEM THAT WAS ENCOUNTERED:
-{solution_data['problem_description']}
+    PROBLEM THAT WAS ENCOUNTERED:
+    {problem_desc}
 
-ACTUAL SOLUTION IMPLEMENTED:
-{solution_data['actual_solution'] if solution_data['actual_solution'] else 'No explicit solution found in comments - please derive from context'}
+    ACTUAL SOLUTION IMPLEMENTED:
+    {actual_solution}
 
-SPECIFIC FIXES APPLIED:
-- Code Changes: {', '.join(solution_data['code_changes'][:5]) if solution_data['code_changes'] else 'None documented'}
-- Configuration Changes: {', '.join(solution_data['configuration_changes'][:3]) if solution_data['configuration_changes'] else 'None documented'}
-- Who Fixed It: {solution_data['who_fixed']}
-- When Fixed: {solution_data['when_fixed']}
+    SPECIFIC FIXES APPLIED:
+    - Code Changes: {code_changes_str}
+    - Configuration Changes: {config_changes_str}
+    - Who Fixed It: {who_fixed}
+    - When Fixed: {when_fixed}
 
-RESOLUTION STEPS TAKEN:
-{chr(10).join(solution_data['resolution_steps']) if solution_data['resolution_steps'] else 'No explicit steps documented'}
+    RESOLUTION STEPS TAKEN:
+    {resolution_steps_str}
 
-ADDITIONAL CONTEXT FROM COMMENTS:
-{chr(10).join([f"- {fix['author']} ({fix['date']}): {fix['content'][:200]}..." for fix in solution_data['fix_details'][:3]])}
+    ADDITIONAL CONTEXT FROM COMMENTS:{fix_details_section}
 
-Create a comprehensive article with these sections:
+    Create a comprehensive article with these sections:
 
-1. **Problem Overview** - What issue was encountered (be specific about {summary})
-2. **Root Cause Analysis** - What caused this issue (if mentioned in comments)
-3. **Solution Implementation** - EXACTLY what was done to fix it (USE THE ACTUAL SOLUTION DATA!)
-4. **Technical Details** - Include any code changes, configurations, or commands used
-5. **Verification Steps** - How the fix was verified to work
-6. **Business Impact** - What was the impact of this fix
-7. **Related Knowledge** - Similar issues that might benefit from this solution
-8. **Preventive Measures** - How to prevent this issue in the future
-9. **Next Steps** - Any follow-up actions or monitoring needed
+    1. **Problem Overview** - What issue was encountered (be specific about {summary})
+    2. **Root Cause Analysis** - What caused this issue (if mentioned in comments)
+    3. **Solution Implementation** - EXACTLY what was done to fix it (USE THE ACTUAL SOLUTION DATA!)
+    4. **Technical Details** - Include any code changes, configurations, or commands used
+    5. **Verification Steps** - How the fix was verified to work
+    6. **Business Impact** - What was the impact of this fix
+    7. **Related Knowledge** - Similar issues that might benefit from this solution
+    8. **Preventive Measures** - How to prevent this issue in the future
+    9. **Next Steps** - Any follow-up actions or monitoring needed
 
-CRITICAL REQUIREMENTS:
-- Document WHAT WAS ACTUALLY DONE, not what COULD be done
-- Include specific technical details from the comments
-- If code or configuration changes were made, include them
-- Make this a record of the ACTUAL RESOLUTION, not a generic guide
+    CRITICAL REQUIREMENTS:
+    - Document WHAT WAS ACTUALLY DONE, not what COULD be done
+    - Include specific technical details from the comments
+    - If code or configuration changes were made, include them
+    - Make this a record of the ACTUAL RESOLUTION, not a generic guide
 
-Write in professional Markdown format."""
+    Write in professional Markdown format."""
 
         if refinement_suggestion:
             prompt += f"\n\nREFINEMENT REQUEST:\n{refinement_suggestion}"
 
         return prompt
-
-    def _generate_article(self) -> Dict[str, Any]:
-        """Generate article based on ACTUAL ticket resolution"""
-        ticket_id = self.mental_state.beliefs["ticket_id"]
-        refinement_suggestion = self.mental_state.beliefs.get("refinement_suggestion")
-        human_feedback = self.mental_state.beliefs.get("human_feedback")
-        article_version = self.mental_state.beliefs.get("article_version", 1)
-        
-        self.log(f"[GENERATION] Generating article v{article_version} for resolved ticket: {ticket_id}")
-        
-        # Get ticket data with full details
-        project_id = ticket_id.split('-')[0] if '-' in ticket_id else "PROJ123"
-        
-        # CRITICAL FIX: Clear cache to force fresh data load
-        self.log(f"[CACHE] Clearing cache for project {project_id} to get latest comments")
-        
-        # Clear all cached data for this project
-        if self.shared_memory.redis_client:
-            cache_patterns = [
-                f"tickets:{project_id}",
-                f"jira_api_data:{project_id}:*",
-                f"filtered_tickets:{project_id}:*",
-                f"jira_raw_data:*"
-            ]
-            
-            for pattern in cache_patterns:
-                for key in self.shared_memory.redis_client.scan_iter(match=pattern):
-                    self.shared_memory.redis_client.delete(key)
-                    self.log(f"[CACHE] Deleted cache key: {key}")
-        
-        # CRITICAL: Force fresh data load
-        jira_result = self.jira_data_agent.run({
-            "project_id": project_id,
-            "force_fresh": True,  # Add flag to force fresh load
-            "workflow_context": "article_generation"  # This triggers fresh load in JiraDataAgent
-        })
-        
-        all_tickets = jira_result.get("tickets", [])
-        target_ticket = None
-        
-        self.log(f"[DATA] Loaded {len(all_tickets)} fresh tickets from project {project_id}")
-        
-        for ticket in all_tickets:
-            if ticket.get("key") == ticket_id:
-                target_ticket = ticket
-                # Log comment count to verify fresh data
-                comments = ticket.get("fields", {}).get("comment", {}).get("comments", [])
-                self.log(f"[DATA] Found ticket {ticket_id} with {len(comments)} comments (fresh data)")
-                break
-        
-        if not target_ticket:
-            self.log(f"[ERROR] Could not find ticket {ticket_id}")
-            return self._create_fallback_article(ticket_id)
-        
-        # CRITICAL: Extract the actual solution from the ticket
-        solution_data = self._extract_solution_from_ticket(target_ticket)
-        
-        if not solution_data["actual_solution"] and not solution_data["fix_details"]:
-            self.log(f"[WARNING] No explicit solution found in ticket {ticket_id} - will try to derive from context")
-        
-        # Check if we need collaboration for additional context
-        assessment = self._assess_collaboration_needs()
-        enhanced_context = {}
-        
-        if assessment.get("needs_collaboration", True):
-            self.log("[DECISION] Collaboration needed for comprehensive article")
-            enhanced_context = self._coordinate_with_agents(assessment)
-        
-        # Build prompt with actual solution data
-        prompt = self._build_comprehensive_prompt_with_solution(
-            ticket_id, 
-            target_ticket,
-            solution_data,
-            enhanced_context, 
-            refinement_suggestion
-        )
-        
-        try:
-            # Generate article content
-            content = self.model_manager.generate_response(
-                prompt=prompt,
-                context={
-                    "agent_name": self.name,
-                    "task_type": "article_generation_from_resolution",
-                    "ticket_id": ticket_id,
-                    "has_actual_solution": bool(solution_data["actual_solution"]),
-                    "solution_extracted": True,
-                    "article_version": article_version
-                }
-            )
-            
-            self.log(f"✅ Generated article based on actual resolution")
-            
-            # Create article with metadata
-            article = {
-                "content": content,
-                "status": "draft",
-                "title": f"Know-How: {ticket_id} - {target_ticket.get('fields', {}).get('summary', 'Resolution Guide')}",
-                "created_at": datetime.now().isoformat(),
-                "last_modified": datetime.now().isoformat(),
-                "version": article_version,
-                "approval_status": "pending",
-                "feedback_history": [],
-                "solution_metadata": {
-                    "has_explicit_solution": bool(solution_data["actual_solution"]),
-                    "solution_source": "ticket_comments" if solution_data["fix_details"] else "derived",
-                    "who_fixed": solution_data["who_fixed"],
-                    "when_fixed": solution_data["when_fixed"],
-                    "code_changes_found": len(solution_data["code_changes"]),
-                    "config_changes_found": len(solution_data["configuration_changes"])
-                },
-                "collaboration_enhanced": bool(enhanced_context.get("collaboration_successful")),
-                "quality_indicators": {
-                    "based_on_actual_resolution": True,
-                    "solution_extracted": bool(solution_data["actual_solution"]),
-                    "technical_details_included": bool(solution_data["code_changes"] or solution_data["configuration_changes"])
-                }
-            }
-            
-            # Store version
-            self._store_article_version(ticket_id, article_version, article)
-            
-            return article
-            
-        except Exception as e:
-            self.log(f"[ERROR] Article generation failed: {e}")
-            return self._create_fallback_article(ticket_id)
 
     def _detect_query_type(self, query: str) -> QueryType:
         if not query:
@@ -724,72 +640,155 @@ Write in professional Markdown format."""
             return "minor"
 
     def _generate_article(self) -> Dict[str, Any]:
-        """Enhanced article generation with feedback support"""
+        """Generate article based on ACTUAL ticket resolution with feedback support"""
         ticket_id = self.mental_state.beliefs["ticket_id"]
         refinement_suggestion = self.mental_state.beliefs.get("refinement_suggestion")
         human_feedback = self.mental_state.beliefs.get("human_feedback")
         article_version = self.mental_state.beliefs.get("article_version", 1)
         
-        self.log(f"[GENERATION] Generating article v{article_version} for ticket: {ticket_id}")
+        self.log(f"[GENERATION] Generating article v{article_version} for resolved ticket: {ticket_id}")
         
         if human_feedback:
             self.log(f"[GENERATION] Processing human feedback: {human_feedback[:100]}...")
         
+        # Get ticket data with full details
+        project_id = ticket_id.split('-')[0] if '-' in ticket_id else "PROJ123"
+        
+        # CRITICAL FIX: Clear cache to force fresh data load
+        self.log(f"[CACHE] Clearing cache for project {project_id} to get latest comments")
+        
+        # Clear all cached data for this project
+        if self.shared_memory.redis_client:
+            cache_patterns = [
+                f"tickets:{project_id}",
+                f"jira_api_data:{project_id}:*",
+                f"filtered_tickets:{project_id}:*",
+                f"jira_raw_data:*"
+            ]
+            
+            for pattern in cache_patterns:
+                for key in self.shared_memory.redis_client.scan_iter(match=pattern):
+                    self.shared_memory.redis_client.delete(key)
+                    self.log(f"[CACHE] Deleted cache key: {key}")
+        
+        # CRITICAL: Force fresh data load
+        jira_result = self.jira_data_agent.run({
+            "project_id": project_id,
+            "force_fresh": True,  # Add flag to force fresh load
+            "workflow_context": "article_generation"  # This triggers fresh load in JiraDataAgent
+        })
+        
+        all_tickets = jira_result.get("tickets", [])
+        target_ticket = None
+        
+        self.log(f"[DATA] Loaded {len(all_tickets)} fresh tickets from project {project_id}")
+        
+        for ticket in all_tickets:
+            if ticket.get("key") == ticket_id:
+                target_ticket = ticket
+                # Log comment count to verify fresh data
+                comments = ticket.get("fields", {}).get("comment", {}).get("comments", [])
+                self.log(f"[DATA] Found ticket {ticket_id} with {len(comments)} comments (fresh data)")
+                break
+        
+        if not target_ticket:
+            self.log(f"[ERROR] Could not find ticket {ticket_id}")
+            return self._create_fallback_article(ticket_id)
+        
+        # CRITICAL: Extract the actual solution from the ticket
+        solution_data = self._extract_solution_from_ticket(target_ticket)
+        
+        if not solution_data["actual_solution"] and not solution_data["fix_details"]:
+            self.log(f"[WARNING] No explicit solution found in ticket {ticket_id} - will try to derive from context")
+        
         # Get previous version if this is a refinement
         previous_article = None
         if article_version > 1 or human_feedback:
-            # Try to get from input data first
             previous_article = self.mental_state.beliefs.get("previous_article")
             if not previous_article:
-                # Fallback to Redis lookup
                 previous_article = self._get_previous_article_version(ticket_id, article_version - 1)
         
-        # Check if we need collaboration
+        # Check if we need collaboration for additional context
         assessment = self._assess_collaboration_needs()
         enhanced_context = {}
         
         if assessment.get("needs_collaboration", True):
-            self.log("[DECISION] Collaboration needed - coordinating with other agents")
+            self.log("[DECISION] Collaboration needed for comprehensive article")
             enhanced_context = self._coordinate_with_agents(assessment)
         
-        # Build prompt with feedback context
-        prompt = self._build_comprehensive_prompt_with_feedback(
-            ticket_id, 
-            enhanced_context, 
-            refinement_suggestion,
-            human_feedback,
-            previous_article
-        )
+        # Build prompt based on whether we have feedback or not
+        if human_feedback and previous_article:
+            # Use feedback-aware prompt that ALSO includes solution data
+            prompt = self._build_comprehensive_prompt_with_feedback_and_solution(
+                ticket_id, 
+                target_ticket,
+                solution_data,
+                enhanced_context,
+                refinement_suggestion,
+                human_feedback,
+                previous_article
+            )
+        else:
+            # Use solution-focused prompt for initial generation
+            prompt = self._build_comprehensive_prompt_with_solution(
+                ticket_id, 
+                target_ticket,
+                solution_data,
+                enhanced_context, 
+                refinement_suggestion
+            )
         
         try:
-            # Use dynamic model selection
+            # Generate article content
             content = self.model_manager.generate_response(
                 prompt=prompt,
                 context={
                     "agent_name": self.name,
-                    "task_type": "article_generation_with_feedback" if human_feedback else "article_generation",
+                    "task_type": "article_generation_with_feedback" if human_feedback else "article_generation_from_resolution",
                     "ticket_id": ticket_id,
-                    "has_collaboration": bool(enhanced_context.get("collaboration_successful")),
-                    "refinement_requested": bool(refinement_suggestion or human_feedback),
-                    "data_completeness": enhanced_context.get("target_ticket") is not None,
+                    "has_actual_solution": bool(solution_data["actual_solution"]),
+                    "solution_extracted": True,
                     "article_version": article_version,
                     "is_human_refinement": bool(human_feedback)
                 }
             )
-            self.log(f"✅ {self.name} received response from model")
-            self.log(f"[GENERATION] Generated article content: {len(content)} characters")
             
-            if not content.strip():
-                raise ValueError("Generated article is empty")
+            self.log(f"✅ Generated article based on actual resolution")
             
             # Create article with metadata
-            article = self._create_article_with_metadata(
-                ticket_id, 
-                content, 
-                enhanced_context,
-                article_version,
-                human_feedback
-            )
+            article = {
+                "content": content,
+                "status": "pending_approval" if article_version > 1 else "draft",
+                "title": f"Know-How: {ticket_id} - {target_ticket.get('fields', {}).get('summary', 'Resolution Guide')}",
+                "created_at": datetime.now().isoformat(),
+                "last_modified": datetime.now().isoformat(),
+                "version": article_version,
+                "approval_status": "pending",
+                "feedback_history": [],
+                "solution_metadata": {
+                    "has_explicit_solution": bool(solution_data["actual_solution"]),
+                    "solution_source": "ticket_comments" if solution_data["fix_details"] else "derived",
+                    "who_fixed": solution_data["who_fixed"],
+                    "when_fixed": solution_data["when_fixed"],
+                    "code_changes_found": len(solution_data["code_changes"]),
+                    "config_changes_found": len(solution_data["configuration_changes"])
+                },
+                "collaboration_enhanced": bool(enhanced_context.get("collaboration_successful")),
+                "quality_indicators": {
+                    "based_on_actual_resolution": True,
+                    "solution_extracted": bool(solution_data["actual_solution"]),
+                    "technical_details_included": bool(solution_data["code_changes"] or solution_data["configuration_changes"])
+                }
+            }
+            
+            # Add feedback to history if provided
+            if human_feedback:
+                article["feedback_history"].append({
+                    "version": article_version - 1,
+                    "feedback": human_feedback,
+                    "timestamp": datetime.now().isoformat(),
+                    "applied": True
+                })
             
             # Store version
             self._store_article_version(ticket_id, article_version, article)
@@ -799,6 +798,118 @@ Write in professional Markdown format."""
         except Exception as e:
             self.log(f"[ERROR] Article generation failed: {e}")
             return self._create_fallback_article(ticket_id)
+        
+    def _build_comprehensive_prompt_with_feedback_and_solution(self, ticket_id: str,
+                                                          ticket_data: Dict[str, Any],
+                                                          solution_data: Dict[str, Any],
+                                                          enhanced_context: Dict[str, Any],
+                                                          refinement_suggestion: str = None,
+                                                          human_feedback: str = None,
+                                                          previous_article: Dict[str, Any] = None) -> str:
+        """Build prompt that includes BOTH solution data AND feedback"""
+        
+        fields = ticket_data.get("fields", {})
+        summary = fields.get("summary", "No summary")
+        
+        # Extract previous content safely
+        previous_content = ""
+        previous_version = 1
+        if previous_article:
+            previous_content = previous_article.get("content", "")
+            previous_version = previous_article.get("version", 1)
+        
+        # Ensure solution_data is safe
+        if not solution_data:
+            solution_data = {
+                "actual_solution": "",
+                "code_changes": [],
+                "configuration_changes": [],
+                "resolution_steps": [],
+                "fix_details": [],
+                "who_fixed": "Unknown",
+                "when_fixed": "Unknown"
+            }
+        
+        # Build safe strings
+        actual_solution = solution_data.get('actual_solution') or 'No explicit solution found - derive from context below'
+        who_fixed = solution_data.get('who_fixed') or 'Unknown'
+        when_fixed = solution_data.get('when_fixed') or 'Unknown'
+        
+        # Safe list handling
+        code_changes = solution_data.get('code_changes', [])
+        code_changes_str = ', '.join(str(c) for c in code_changes[:5]) if code_changes else 'None documented'
+        
+        config_changes = solution_data.get('configuration_changes', [])
+        config_changes_str = ', '.join(str(c) for c in config_changes[:3]) if config_changes else 'None documented'
+        
+        resolution_steps = solution_data.get('resolution_steps', [])
+        resolution_steps_str = '\n'.join(str(s) for s in resolution_steps) if resolution_steps else 'No explicit steps documented'
+        
+        # Build fix details section safely
+        fix_details_section = ""
+        fix_details = solution_data.get('fix_details', [])
+        if fix_details:
+            for fix in fix_details[:3]:
+                if isinstance(fix, dict):
+                    author = fix.get('author', 'Unknown')
+                    date = fix.get('date', 'Unknown')
+                    content = (fix.get('content') or '')[:200]
+                    fix_details_section += f"\n- {author} ({date}): {content}..."
+        else:
+            fix_details_section = "\nNo additional comment details available"
+        
+        # Now build the prompt with all safe values
+        prompt = f"""You are refining an article based on human feedback AND the actual solution implemented.
+
+    TICKET INFORMATION:
+    - Ticket ID: {ticket_id}
+    - Summary: {summary}
+    - Status: RESOLVED/DONE
+
+    ACTUAL SOLUTION IMPLEMENTED:
+    {actual_solution}
+
+    SPECIFIC FIXES APPLIED:
+    - Code Changes: {code_changes_str}
+    - Configuration Changes: {config_changes_str}
+    - Who Fixed It: {who_fixed}
+    - When Fixed: {when_fixed}
+
+    RESOLUTION STEPS TAKEN:
+    {resolution_steps_str}
+
+    ADDITIONAL CONTEXT FROM COMMENTS:{fix_details_section}
+
+    PREVIOUS ARTICLE (Version {previous_version}):
+    {previous_content}
+
+    HUMAN FEEDBACK TO ADDRESS:
+    {human_feedback or 'No specific feedback provided'}
+
+    REFINEMENT INSTRUCTIONS:
+    1. Read the human feedback carefully
+    2. Ensure the article documents the ACTUAL SOLUTION from the comments
+    3. Incorporate ALL requested changes from the feedback
+    4. Maintain the good parts of the previous version
+    5. Make sure technical details from the actual fix are included
+
+    Generate a COMPLETE article with these sections:
+    1. **Problem Overview** - What issue was encountered
+    2. **Root Cause Analysis** - What caused this issue (from comments if available)
+    3. **Solution Implementation** - EXACTLY what was done to fix it (USE THE ACTUAL SOLUTION DATA!)
+    4. **Technical Details** - Include code/config changes from comments
+    5. **Verification Steps** - How the fix was verified
+    6. **Business Impact** - Impact of this fix
+    7. **Related Knowledge** - Similar issues that might benefit
+    8. **Preventive Measures** - How to prevent this in future
+    9. **Next Steps** - Follow-up actions or monitoring
+
+    Write in professional Markdown format. This MUST document the ACTUAL RESOLUTION, not generic advice!"""
+        
+        if refinement_suggestion:
+            prompt += f"\n\nADDITIONAL REFINEMENT REQUEST:\n{str(refinement_suggestion)}"
+        
+        return prompt
 
     def _build_comprehensive_prompt(self, ticket_id: str, enhanced_context: Dict[str, Any], 
                                    refinement_suggestion: str = None) -> str:
