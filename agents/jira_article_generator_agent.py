@@ -232,54 +232,66 @@ class JiraArticleGeneratorAgent(BaseAgent):
         else:
             fix_details_section = "\nNo additional comment details available"
         
-        prompt = f"""You are creating a knowledge article about how a specific issue was ACTUALLY RESOLVED.
+        prompt = f"""You must output ONLY the article content. Do not include any preamble, introduction, or meta-commentary.
 
-    IMPORTANT: This article should document WHAT WAS ACTUALLY DONE to fix the issue, not generic advice!
+    DO NOT START WITH:
+    - "Sure, I'd be happy to..."
+    - "Here's an example..."
+    - "As an AI..."
+    - "I will create..."
+    - Any greeting or acknowledgment
 
-    TICKET INFORMATION:
-    - Ticket ID: {ticket_id}
+    START DIRECTLY WITH THE ARTICLE TITLE.
+
+    TICKET DATA:
+    - ID: {ticket_id}
     - Summary: {summary}
-    - Status: RESOLVED/DONE
+    - Problem: {problem_desc}
+    - Solution: {actual_solution}
+    - Fixed by: {who_fixed} on {when_fixed}
 
-    PROBLEM THAT WAS ENCOUNTERED:
+    OUTPUT THE FOLLOWING ARTICLE DIRECTLY:
+
+    # Know-How: {ticket_id} - {summary}
+
+    ## Problem Overview
     {problem_desc}
 
-    ACTUAL SOLUTION IMPLEMENTED:
+    ## Root Cause Analysis
+    [Analyze why this issue occurred based on: {actual_solution}]
+
+    ## Solution Implementation
     {actual_solution}
 
-    SPECIFIC FIXES APPLIED:
-    - Code Changes: {code_changes_str}
-    - Configuration Changes: {config_changes_str}
-    - Who Fixed It: {who_fixed}
-    - When Fixed: {when_fixed}
-
-    RESOLUTION STEPS TAKEN:
+    ### Implementation Steps:
     {resolution_steps_str}
 
-    ADDITIONAL CONTEXT FROM COMMENTS:{fix_details_section}
+    ## Technical Details
+    ### Code Changes
+    {code_changes_str}
 
-    Create a comprehensive article with these sections:
+    ### Configuration Changes
+    {config_changes_str}
 
-    1. **Problem Overview** - What issue was encountered (be specific about {summary})
-    2. **Root Cause Analysis** - What caused this issue (if mentioned in comments)
-    3. **Solution Implementation** - EXACTLY what was done to fix it (USE THE ACTUAL SOLUTION DATA!)
-    4. **Technical Details** - Include any code changes, configurations, or commands used
-    5. **Verification Steps** - How the fix was verified to work
-    6. **Business Impact** - What was the impact of this fix
-    7. **Related Knowledge** - Similar issues that might benefit from this solution
-    8. **Preventive Measures** - How to prevent this issue in the future
-    9. **Next Steps** - Any follow-up actions or monitoring needed
+    ## Verification Steps
+    [Document how the fix was verified to work correctly]
 
-    CRITICAL REQUIREMENTS:
-    - Document WHAT WAS ACTUALLY DONE, not what COULD be done
-    - Include specific technical details from the comments
-    - If code or configuration changes were made, include them
-    - Make this a record of the ACTUAL RESOLUTION, not a generic guide
+    ## Business Impact
+    [Describe the impact of this issue and its resolution on users/business]
 
-    Write in professional Markdown format."""
+    ## Related Knowledge
+    [List similar issues or patterns: look for tickets with similar symptoms]
+
+    ## Preventive Measures
+    [Based on the root cause, list steps to prevent recurrence]
+
+    ## Next Steps
+    [Any follow-up actions or monitoring required]
+
+    BEGIN OUTPUT NOW:"""
 
         if refinement_suggestion:
-            prompt += f"\n\nREFINEMENT REQUEST:\n{refinement_suggestion}"
+            prompt += f"\n\nADDITIONAL REQUIREMENT: {refinement_suggestion}"
 
         return prompt
 
@@ -859,7 +871,16 @@ class JiraArticleGeneratorAgent(BaseAgent):
             fix_details_section = "\nNo additional comment details available"
         
         # Now build the prompt with all safe values
-        prompt = f"""You are refining an article based on human feedback AND the actual solution implemented.
+        prompt = f"""You are refining an article based on human feedback AND the actual solution implemented. You are a technical documentation writer. Write professional, direct documentation without any meta-commentary or conversational elements. Never refer to yourself or your capabilities. Write as if you are the technical expert who resolved the issue. You must output ONLY the article content. Do not include any preamble, introduction, or meta-commentary.
+
+    DO NOT START WITH:
+    - "Sure, I'd be happy to..."
+    - "Here's an example..."
+    - "As an AI..."
+    - "I will create..."
+    - Any greeting or acknowledgment
+
+    START DIRECTLY WITH THE ARTICLE TITLE.
 
     TICKET INFORMATION:
     - Ticket ID: {ticket_id}

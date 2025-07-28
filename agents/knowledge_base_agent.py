@@ -46,28 +46,24 @@ class KnowledgeBaseAgent(BaseAgent):
         article = self.mental_state.beliefs["article"]
         content = article.get("content", "")
         
-        prompt_template = f"""<|system|>You are an AI specialized in evaluating Confluence-ready markdown articles for quality and relevance.
-        Review the following article and determine if it's suitable for publishing or needs refinement.
-        You MUST ALWAYS return a refinement suggestion - this is critical. Provide a specific, actionable suggestion 
-        (e.g., adding metrics, visuals, specific technical implementation details, or improving clarity). 
-        Even if the article is good, find one area that could be improved.
-        
-        Article:
-        {content}
-        
-        Return the evaluation as a JSON object with:
-        - "redundant": boolean (true if the article is redundant or lacks value)
-        - "refinement_suggestion": string (specific suggestion for improvement - THIS MUST ALWAYS BE PROVIDED)
-        
-        Example output:
-        ```json
-        {{
-            "redundant": false,
-            "refinement_suggestion": "Add a table comparing performance metrics before and after optimization, including specific throughput numbers and response times."
-        }}
-        ```json
-        
-        Output ONLY the JSON object, without additional text.<|assistant|>"""
+        prompt_template = f"""You are evaluating a technical documentation article.
+
+            Review the article and provide your evaluation as a JSON object.
+
+            Article to evaluate:
+            {content}
+
+            Evaluate based on:
+            1. Is the content redundant or lacking technical value?
+            2. What specific improvements would make this article more valuable?
+
+            Return ONLY a JSON object (no other text) with this exact format:
+            {{
+                "redundant": false,
+                "refinement_suggestion": "Add specific metric values and performance benchmarks to quantify the improvement achieved by this fix."
+            }}
+
+            Provide a specific, actionable refinement suggestion even if the article is good."""
         
         self.log(f"[DEBUG] Article evaluation prompt: {prompt_template[:500]}...")
         

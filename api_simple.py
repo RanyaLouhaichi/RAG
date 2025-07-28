@@ -12,7 +12,7 @@ import time
 from datetime import datetime, timedelta
 from threading import Lock
 import threading
-
+import hashlib
 import numpy as np
 
 # Add the parent directory to the path
@@ -21,6 +21,33 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from orchestrator.core.orchestrator import orchestrator # type: ignore
 from integrations.api_config import APIConfig
 from integrations.jira_api_client import JiraAPIClient
+
+import logging
+import sys
+
+# Configure logging properly to avoid duplicates
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[]  # Clear default handlers
+)
+
+# Get the logger
+logger = logging.getLogger("JurixAPI")
+logger.handlers = []  # Clear any existing handlers
+logger.setLevel(logging.INFO)
+
+# Add a single handler
+handler = logging.StreamHandler(sys.stdout)
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(handler)
+
+# Prevent propagation
+logger.propagate = False
+
+# Also fix werkzeug logging
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.setLevel(logging.INFO)
 
 # Force reload .env
 load_dotenv(override=True)
@@ -76,6 +103,39 @@ class DashboardUpdateTracker:
                     u for u in self.updates[project_key] 
                     if u['timestamp'] > cutoff_time
                 ]
+
+from functools import wraps
+from datetime import datetime, timedelta
+
+# Rate limiting
+request_times = defaultdict(list)
+
+def rate_limit(max_requests=3, window_seconds=10):
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            now = datetime.now()
+            ticket_id = kwargs.get('ticket_id', 'unknown')
+            
+            # Clean old requests
+            cutoff = now - timedelta(seconds=window_seconds)
+            request_times[ticket_id] = [t for t in request_times[ticket_id] if t > cutoff]
+            
+            # Check rate limit
+            if len(request_times[ticket_id]) >= max_requests:
+                logger.warning(f"Rate limit exceeded for {ticket_id}")
+                return jsonify({
+                    "status": "rate_limited",
+                    "message": f"Too many requests. Please wait {window_seconds} seconds.",
+                    "retry_after": window_seconds
+                }), 429
+            
+            # Record this request
+            request_times[ticket_id].append(now)
+            
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
 
 # CREATE GLOBAL INSTANCE (after the class definition)
 update_tracker = DashboardUpdateTracker()
@@ -148,6 +208,125 @@ try:
         logger.info("❌ Failed to enable enhanced RAG")
 except Exception as e:
     logger.error(f"❌ Error enabling enhanced RAG: {e}")
+
+# Request tracking
+request_tracker = {}
+request_lock = Lock()
+
+def get_request_hash(ticket_id, request_data):
+    """Generate a hash for request deduplication"""
+    data_str = f"{ticket_id}_{json.dumps(request_data, sort_keys=True)}"
+    return hashlib.md5(data_str.encode()).hexdigest()
+
+# Ticket-level locks
+ticket_locks = defaultdict(threading.Lock)
+processing_tickets = set()
+
+@app.route("/api/article/generate/<ticket_id>", methods=["POST"])
+@rate_limit(max_requests=1, window_seconds=30) 
+def generate_article(ticket_id):
+    """Generate initial article for a resolved ticket"""
+    
+    # Get ticket-specific lock
+    with ticket_locks[ticket_id]:
+        # Check if already processing
+        if ticket_id in processing_tickets:
+            logger.warning(f"Already processing article for {ticket_id}")
+            
+            # Check if article exists in Redis
+            article_key = f"article_draft:{ticket_id}"
+            article_json = orchestrator.shared_memory.redis_client.get(article_key)
+            
+            if article_json:
+                article = json.loads(article_json)
+                return jsonify({
+                    "status": "success",
+                    "ticket_id": ticket_id,
+                    "article": article,
+                    "version": article.get("version", 1),
+                    "approval_status": article.get("approval_status", "pending"),
+                    "message": "Article already generated."
+                })
+            else:
+                return jsonify({
+                    "status": "processing",
+                    "message": "Article generation in progress. Please wait.",
+                    "ticket_id": ticket_id
+                }), 202
+        
+        # Mark as processing
+        processing_tickets.add(ticket_id)
+    
+    try:
+        # Log only once
+        logger.info(f"📝 ========== ARTICLE GENERATION REQUEST ==========")
+        logger.info(f"📝 Ticket ID: {ticket_id}")
+        
+        # Get request data
+        request_data = request.get_json() or {}
+        project_id = request_data.get('projectKey') or ticket_id.split('-')[0] if '-' in ticket_id else "PROJ123"
+        
+        logger.info(f"📝 Project ID: {project_id}")
+        
+        # Check if article already exists before running workflow
+        article_key = f"article_draft:{ticket_id}"
+        existing_article = orchestrator.shared_memory.redis_client.get(article_key)
+        
+        if existing_article:
+            logger.info(f"📝 Article already exists for {ticket_id}")
+            article = json.loads(existing_article)
+            return jsonify({
+                "status": "success",
+                "ticket_id": ticket_id,
+                "article": article,
+                "version": article.get("version", 1),
+                "approval_status": article.get("approval_status", "pending"),
+                "message": "Article already exists."
+            })
+        
+        # Run article generation workflow
+        logger.info(f"📝 Starting workflow for {ticket_id}")
+        result = orchestrator.run_jira_workflow(ticket_id, project_id=project_id)
+        
+        logger.info(f"📝 Workflow completed with status: {result.get('workflow_status')}")
+        
+        # Extract article from result
+        article = None
+        if "article" in result and result["article"]:
+            article = result["article"]
+        else:
+            # Try Redis
+            article_json = orchestrator.shared_memory.redis_client.get(article_key)
+            if article_json:
+                article = json.loads(article_json)
+        
+        if article:
+            return jsonify({
+                "status": "success",
+                "ticket_id": ticket_id,
+                "article": article,
+                "version": article.get("version", 1),
+                "approval_status": article.get("approval_status", "pending"),
+                "message": "Article generated successfully."
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "error": "Failed to generate article",
+                "ticket_id": ticket_id
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error generating article: {e}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "error": str(e),
+            "ticket_id": ticket_id
+        }), 500
+    finally:
+        # Always remove from processing set
+        with ticket_locks[ticket_id]:
+            processing_tickets.discard(ticket_id)
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -1348,63 +1527,6 @@ def get_collaboration_insights(project_key):
             "error": str(e)
         }), 500
     
-# Fixed api_article_feedback.py - Add this to your api_simple.py
-
-@app.route("/api/article/generate/<ticket_id>", methods=["POST"])
-def generate_article(ticket_id):
-    """Generate initial article for a resolved ticket"""
-    try:
-        logger.info(f"📝 ========== ARTICLE GENERATION REQUEST ==========")
-        logger.info(f"📝 Ticket ID: {ticket_id}")
-        logger.info(f"📝 Request Method: {request.method}")
-        logger.info(f"📝 Request Headers: {dict(request.headers)}")
-        logger.info(f"📝 Request Data: {request.get_json()}")
-        
-        # Get ticket details first
-        project_id = ticket_id.split('-')[0] if '-' in ticket_id else "PROJ123"
-        
-        logger.info(f"📝 Project ID extracted: {project_id}")
-        
-        # Run article generation workflow
-        result = orchestrator.run_jira_workflow(ticket_id, project_id=project_id)
-        
-        logger.info(f"📝 Workflow result: {result.get('workflow_status')}")
-        
-        # Extract the generated article
-        article = result.get("article", {})
-        workflow_status = result.get("workflow_status", "failure")
-        
-        if workflow_status == "success" and article:
-            # Store article in shared memory for easy retrieval
-            article_key = f"article_draft:{ticket_id}"
-            # Use Redis directly instead of shared_memory.store
-            orchestrator.shared_memory.redis_client.set(
-                article_key, 
-                json.dumps(article)
-            )
-            orchestrator.shared_memory.redis_client.expire(article_key, 86400)  # 24 hours
-            
-            return jsonify({
-                "status": "success",
-                "ticket_id": ticket_id,
-                "article": article,
-                "version": article.get("version", 1),
-                "approval_status": article.get("approval_status", "pending"),
-                "message": "Article generated successfully. Please review and provide feedback."
-            })
-        else:
-            return jsonify({
-                "status": "error",
-                "error": "Failed to generate article",
-                "details": result.get("error", "Unknown error")
-            }), 500
-            
-    except Exception as e:
-        logger.error(f"Error generating article: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "error": str(e)
-        }), 500
 
 # Make sure this endpoint exists in your api_simple.py file:
 
@@ -1604,6 +1726,9 @@ def submit_article_feedback(ticket_id):
 @app.route("/api/article/status/<ticket_id>", methods=["GET"])
 def get_article_status(ticket_id):
     """Get current article status and version"""
+    # Add request tracking
+    user_agent = request.headers.get('User-Agent', 'Unknown')
+    logger.debug(f"Article status check for {ticket_id} from {user_agent}")
     try:
         # Check for approved article first
         approved_key = f"article_approved:{ticket_id}"
@@ -1616,7 +1741,8 @@ def get_article_status(ticket_id):
                 "ticket_id": ticket_id,
                 "article": approved_article,
                 "approval_status": "approved",
-                "is_final": True
+                "is_final": True,
+                "exists": True
             })
         
         # Check for draft
@@ -1630,19 +1756,24 @@ def get_article_status(ticket_id):
                 "ticket_id": ticket_id,
                 "article": draft_article,
                 "approval_status": draft_article.get("approval_status", "pending"),
-                "is_final": False
+                "is_final": False,
+                "exists": True
             })
         
+        # No article found - this is OK, not an error
         return jsonify({
             "status": "not_found",
+            "ticket_id": ticket_id,
+            "exists": False,
             "message": "No article found for this ticket"
-        }), 404
+        }), 200  # Changed from 404 to 200 with exists: false
         
     except Exception as e:
         logger.error(f"Error getting article status: {e}")
         return jsonify({
             "status": "error",
-            "error": str(e)
+            "error": str(e),
+            "exists": False
         }), 500
 
 @app.route("/api/article/history/<ticket_id>", methods=["GET"])
@@ -2857,6 +2988,22 @@ def suggestion_analytics():
             "status": "error",
             "error": str(e)
         }), 500
+
+@app.before_request
+def log_request_info():
+    """Log all incoming requests for debugging"""
+    if request.path.startswith('/api/article'):
+        logger.info(f"📥 {request.method} {request.path} from {request.remote_addr}")
+        logger.info(f"   Headers: {dict(request.headers)}")
+        if request.method == "POST":
+            logger.info(f"   Body size: {request.content_length}")
+
+@app.after_request
+def log_response_info(response):
+    """Log all responses for debugging"""
+    if request.path.startswith('/api/article'):
+        logger.info(f"📤 {request.method} {request.path} -> {response.status_code}")
+    return response
     
 @app.route("/api/neo4j/debug/<ticket_id>", methods=["GET"])
 def debug_neo4j_ticket(ticket_id):
@@ -3305,4 +3452,4 @@ if __name__ == "__main__":
     if not orchestrator.jira_data_agent.available_projects:
         logger.warning("⚠️ No projects found! Check your Jira connection.")
     
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    app.run(debug=False, host='0.0.0.0', port=5001, threaded=False, processes=1)

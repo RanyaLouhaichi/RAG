@@ -432,13 +432,21 @@ class EnhancedMentalState:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert mental state to dictionary"""
+        beliefs_dict = {}
+        for k, v in self.beliefs.items():
+            if hasattr(v, 'to_dict'):
+                beliefs_dict[k] = v.to_dict()
+            else:
+                # Handle beliefs that are just values (not ConfidentBelief objects)
+                beliefs_dict[k] = v
+        
         return {
             "agent_id": self.agent_id,
             "capabilities": [cap.value for cap in self.capabilities],
             "obligations": self.obligations,
-            "beliefs": {k: v.to_dict() for k, v in self.beliefs.items()},
+            "beliefs": beliefs_dict,
             "decisions": self.decisions,
-            "competency_model": self.competency_model.to_dict(),
+            "competency_model": self.competency_model.to_dict() if self.competency_model else {},
             "reflection_patterns": self.reflection_patterns,
             "collaborative_requests": self.collaborative_requests
         }
