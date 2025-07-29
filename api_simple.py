@@ -301,10 +301,21 @@ def generate_article(ticket_id):
                 article = json.loads(article_json)
         
         if article:
+            # ADD THE MARKDOWN CONVERSION HERE
+            import markdown2
+            
+            # Convert markdown to HTML for display
+            if article.get("content"):
+                article["content_html"] = markdown2.markdown(
+                    article["content"], 
+                    extras=['fenced-code-blocks', 'tables', 'break-on-newline']
+                )
+            
             return jsonify({
                 "status": "success",
                 "ticket_id": ticket_id,
                 "article": article,
+                "formatted_content": article.get("content_html", ""),  # This will be rendered HTML
                 "version": article.get("version", 1),
                 "approval_status": article.get("approval_status", "pending"),
                 "message": "Article generated successfully."
@@ -315,6 +326,7 @@ def generate_article(ticket_id):
                 "error": "Failed to generate article",
                 "ticket_id": ticket_id
             }), 500
+        
             
     except Exception as e:
         logger.error(f"Error generating article: {e}", exc_info=True)

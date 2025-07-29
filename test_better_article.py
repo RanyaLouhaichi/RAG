@@ -3,14 +3,14 @@ import requests
 import json
 
 # First, clear any existing article
-ticket_id = "OBSERVE-2"
+ticket_id = "OBSERVE-14"
 
 response = requests.post(
     f"http://localhost:5001/api/article/generate/{ticket_id}",
     json = {
     "projectKey": "OBSERVE",
-    "summary": "Search function returns outdated results after data update",
-    "description": "When new data is added or updated, the search results still show old values until a manual refresh. Users expect the search to reflect the latest data immediately.",
+    "summary": "User activity logs do not show timestamps",
+    "description": "The user activity log page lists actions performed by users, but does not display the date and time for each action, making it difficult to track when changes occurred.",
     "type": "Bug",
     "status": "Done"
 },

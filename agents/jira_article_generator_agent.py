@@ -182,116 +182,94 @@ class JiraArticleGeneratorAgent(BaseAgent):
                     solution_data["resolution_steps"].append(line.strip())
 
     def _build_comprehensive_prompt_with_solution(self, ticket_id: str, ticket_data: Dict[str, Any], 
-                                            solution_data: Dict[str, Any], 
-                                            enhanced_context: Dict[str, Any],
-                                            refinement_suggestion: str = None) -> str:
-        """Build prompt that focuses on the ACTUAL solution implemented"""
+                                        solution_data: Dict[str, Any], 
+                                        enhanced_context: Dict[str, Any],
+                                        refinement_suggestion: str = None) -> str:
+        """Build prompt that generates a REAL article based on the solution"""
         
         fields = ticket_data.get("fields", {})
         summary = fields.get("summary", "No summary")
+        description = fields.get("description", "")
+        issue_type = fields.get("issuetype", {}).get("name", "Issue")
         
-        # ENSURE solution_data has all required fields
-        if not solution_data:
-            solution_data = {
-                "problem_description": "",
-                "actual_solution": "",
-                "fix_details": [],
-                "code_changes": [],
-                "configuration_changes": [],
-                "resolution_steps": [],
-                "who_fixed": "",
-                "when_fixed": "",
-            }
+        # Extract solution info
+        actual_solution = solution_data.get('actual_solution', '')
+        if not actual_solution and solution_data.get('fix_details'):
+            # Build from fix details
+            fix_details = solution_data['fix_details']
+            if fix_details and isinstance(fix_details[0], dict):
+                actual_solution = fix_details[0].get('content', '')
         
-        # Build safe strings
-        problem_desc = solution_data.get('problem_description') or 'No problem description available'
-        actual_solution = solution_data.get('actual_solution') or 'No explicit solution found in comments - please derive from context'
-        who_fixed = solution_data.get('who_fixed') or 'Unknown'
-        when_fixed = solution_data.get('when_fixed') or 'Unknown'
-        
-        # Safe list handling
-        code_changes = solution_data.get('code_changes', [])
-        code_changes_str = ', '.join(str(c) for c in code_changes[:5]) if code_changes else 'None documented'
-        
-        config_changes = solution_data.get('configuration_changes', [])
-        config_changes_str = ', '.join(str(c) for c in config_changes[:3]) if config_changes else 'None documented'
-        
-        resolution_steps = solution_data.get('resolution_steps', [])
-        resolution_steps_str = '\n'.join(str(s) for s in resolution_steps) if resolution_steps else 'No explicit steps documented'
-        
-        # Build fix details section safely
-        fix_details_section = ""
-        fix_details = solution_data.get('fix_details', [])
-        if fix_details:
-            for fix in fix_details[:3]:
-                if isinstance(fix, dict):
-                    author = fix.get('author', 'Unknown')
-                    date = fix.get('date', 'Unknown')
-                    content = (fix.get('content') or '')[:200]
-                    fix_details_section += f"\n- {author} ({date}): {content}..."
-        else:
-            fix_details_section = "\nNo additional comment details available"
-        
-        prompt = f"""You must output ONLY the article content. Do not include any preamble, introduction, or meta-commentary.
+        prompt = f"""You are a technical documentation expert. Write a complete knowledge base article.
 
-    DO NOT START WITH:
-    - "Sure, I'd be happy to..."
-    - "Here's an example..."
-    - "As an AI..."
-    - "I will create..."
-    - Any greeting or acknowledgment
-
-    START DIRECTLY WITH THE ARTICLE TITLE.
-
-    TICKET DATA:
-    - ID: {ticket_id}
+    Given this resolved issue:
+    - Ticket: {ticket_id}
     - Summary: {summary}
-    - Problem: {problem_desc}
-    - Solution: {actual_solution}
-    - Fixed by: {who_fixed} on {when_fixed}
+    - Type: {issue_type}
+    - Problem Description: {description}
+    - How it was fixed: {actual_solution}
 
-    OUTPUT THE FOLLOWING ARTICLE DIRECTLY:
+    Write a professional article following this exact structure. For each section, write detailed paragraphs of original content. Do not use placeholders or brackets.
 
-    # Know-How: {ticket_id} - {summary}
+    Start your response with:
 
     ## Problem Overview
-    {problem_desc}
+
+    Then write 2-3 paragraphs explaining what the problem was, how it affected users, and why it was important to fix.
 
     ## Root Cause Analysis
-    [Analyze why this issue occurred based on: {actual_solution}]
+
+    Write 2-3 paragraphs analyzing the technical root cause. Explain what went wrong in the code/system and why it caused this issue.
 
     ## Solution Implementation
-    {actual_solution}
 
-    ### Implementation Steps:
-    {resolution_steps_str}
+    Write detailed paragraphs about how the issue was resolved. Explain the fix approach and why it works.
 
-    ## Technical Details
-    ### Code Changes
-    {code_changes_str}
+    ### Implementation Steps
 
-    ### Configuration Changes
-    {config_changes_str}
+    Write numbered steps showing exactly how to implement this fix:
+    1. First specific action...
+    2. Second specific action...
+    3. Continue with all necessary steps...
+
+    ### Technical Details
+
+    If this involved code changes, write the actual code. For example:
+    - Show the before and after code
+    - Explain what changed and why
+    - Include any configuration changes
 
     ## Verification Steps
-    [Document how the fix was verified to work correctly]
+
+    Write specific steps to verify the fix works:
+    1. How to test the fix
+    2. What to look for
+    3. Expected results
 
     ## Business Impact
-    [Describe the impact of this issue and its resolution on users/business]
+
+    Write about how this fix helps the business and users.
+
+    ## Lessons Learned
+
+    Write insights gained from this issue.
 
     ## Related Knowledge
-    [List similar issues or patterns: look for tickets with similar symptoms]
+
+    List any related issues or documentation.
 
     ## Preventive Measures
-    [Based on the root cause, list steps to prevent recurrence]
+
+    Write specific steps to prevent this from happening again.
 
     ## Next Steps
-    [Any follow-up actions or monitoring required]
 
-    BEGIN OUTPUT NOW:"""
+    Write any follow-up actions needed.
+
+    Remember: Write actual content for every section. No placeholders. Be specific and technical."""
 
         if refinement_suggestion:
-            prompt += f"\n\nADDITIONAL REQUIREMENT: {refinement_suggestion}"
+            prompt += f"\n\nAlso incorporate this feedback: {refinement_suggestion}"
 
         return prompt
 
@@ -812,123 +790,119 @@ class JiraArticleGeneratorAgent(BaseAgent):
             return self._create_fallback_article(ticket_id)
         
     def _build_comprehensive_prompt_with_feedback_and_solution(self, ticket_id: str,
-                                                          ticket_data: Dict[str, Any],
-                                                          solution_data: Dict[str, Any],
-                                                          enhanced_context: Dict[str, Any],
-                                                          refinement_suggestion: str = None,
-                                                          human_feedback: str = None,
-                                                          previous_article: Dict[str, Any] = None) -> str:
-        """Build prompt that includes BOTH solution data AND feedback"""
+                                                      ticket_data: Dict[str, Any],
+                                                      solution_data: Dict[str, Any],
+                                                      enhanced_context: Dict[str, Any],
+                                                      refinement_suggestion: str = None,
+                                                      human_feedback: str = None,
+                                                      previous_article: Dict[str, Any] = None) -> str:
+        """Build prompt for article refinement based on feedback"""
         
         fields = ticket_data.get("fields", {})
         summary = fields.get("summary", "No summary")
+        issue_type = fields.get("issuetype", {}).get("name", "Issue")
+        description = fields.get("description", "")
         
-        # Extract previous content safely
-        previous_content = ""
-        previous_version = 1
-        if previous_article:
-            previous_content = previous_article.get("content", "")
-            previous_version = previous_article.get("version", 1)
+        # Get previous version info
+        previous_content = previous_article.get("content", "") if previous_article else ""
+        previous_version = previous_article.get("version", 1) if previous_article else 1
         
-        # Ensure solution_data is safe
-        if not solution_data:
-            solution_data = {
-                "actual_solution": "",
-                "code_changes": [],
-                "configuration_changes": [],
-                "resolution_steps": [],
-                "fix_details": [],
-                "who_fixed": "Unknown",
-                "when_fixed": "Unknown"
-            }
+        # Extract solution info
+        actual_solution = solution_data.get('actual_solution', '')
+        if not actual_solution and solution_data.get('fix_details'):
+            fix_details = solution_data['fix_details']
+            if fix_details and isinstance(fix_details[0], dict):
+                actual_solution = fix_details[0].get('content', '')
         
-        # Build safe strings
-        actual_solution = solution_data.get('actual_solution') or 'No explicit solution found - derive from context below'
-        who_fixed = solution_data.get('who_fixed') or 'Unknown'
-        when_fixed = solution_data.get('when_fixed') or 'Unknown'
-        
-        # Safe list handling
-        code_changes = solution_data.get('code_changes', [])
-        code_changes_str = ', '.join(str(c) for c in code_changes[:5]) if code_changes else 'None documented'
-        
-        config_changes = solution_data.get('configuration_changes', [])
-        config_changes_str = ', '.join(str(c) for c in config_changes[:3]) if config_changes else 'None documented'
-        
-        resolution_steps = solution_data.get('resolution_steps', [])
-        resolution_steps_str = '\n'.join(str(s) for s in resolution_steps) if resolution_steps else 'No explicit steps documented'
-        
-        # Build fix details section safely
-        fix_details_section = ""
-        fix_details = solution_data.get('fix_details', [])
-        if fix_details:
-            for fix in fix_details[:3]:
-                if isinstance(fix, dict):
-                    author = fix.get('author', 'Unknown')
-                    date = fix.get('date', 'Unknown')
-                    content = (fix.get('content') or '')[:200]
-                    fix_details_section += f"\n- {author} ({date}): {content}..."
-        else:
-            fix_details_section = "\nNo additional comment details available"
-        
-        # Now build the prompt with all safe values
-        prompt = f"""You are refining an article based on human feedback AND the actual solution implemented. You are a technical documentation writer. Write professional, direct documentation without any meta-commentary or conversational elements. Never refer to yourself or your capabilities. Write as if you are the technical expert who resolved the issue. You must output ONLY the article content. Do not include any preamble, introduction, or meta-commentary.
+        prompt = f"""You are a technical documentation expert improving an article based on human feedback.
 
-    DO NOT START WITH:
-    - "Sure, I'd be happy to..."
-    - "Here's an example..."
-    - "As an AI..."
-    - "I will create..."
-    - Any greeting or acknowledgment
-
-    START DIRECTLY WITH THE ARTICLE TITLE.
-
-    TICKET INFORMATION:
-    - Ticket ID: {ticket_id}
+    Issue Details:
+    - Ticket: {ticket_id}
     - Summary: {summary}
-    - Status: RESOLVED/DONE
+    - Type: {issue_type}
+    - Problem: {description}
+    - Solution Applied: {actual_solution}
 
-    ACTUAL SOLUTION IMPLEMENTED:
-    {actual_solution}
+    Previous Article (Version {previous_version}):
+    {previous_content[:1000]}...
 
-    SPECIFIC FIXES APPLIED:
-    - Code Changes: {code_changes_str}
-    - Configuration Changes: {config_changes_str}
-    - Who Fixed It: {who_fixed}
-    - When Fixed: {when_fixed}
+    Human Feedback Received:
+    {human_feedback}
 
-    RESOLUTION STEPS TAKEN:
-    {resolution_steps_str}
+    Your Task: Create Version {previous_version + 1} that addresses ALL feedback while maintaining professional documentation standards.
 
-    ADDITIONAL CONTEXT FROM COMMENTS:{fix_details_section}
+    Write the improved article following this structure. Each section must have substantial improvements based on the feedback:
 
-    PREVIOUS ARTICLE (Version {previous_version}):
-    {previous_content}
+    Start with:
 
-    HUMAN FEEDBACK TO ADDRESS:
-    {human_feedback or 'No specific feedback provided'}
+    ## Problem Overview
 
-    REFINEMENT INSTRUCTIONS:
-    1. Read the human feedback carefully
-    2. Ensure the article documents the ACTUAL SOLUTION from the comments
-    3. Incorporate ALL requested changes from the feedback
-    4. Maintain the good parts of the previous version
-    5. Make sure technical details from the actual fix are included
+    Rewrite this section addressing the feedback. Add more detail, clarity, or examples as requested. Write 2-3 comprehensive paragraphs.
 
-    Generate a COMPLETE article with these sections:
-    1. **Problem Overview** - What issue was encountered
-    2. **Root Cause Analysis** - What caused this issue (from comments if available)
-    3. **Solution Implementation** - EXACTLY what was done to fix it (USE THE ACTUAL SOLUTION DATA!)
-    4. **Technical Details** - Include code/config changes from comments
-    5. **Verification Steps** - How the fix was verified
-    6. **Business Impact** - Impact of this fix
-    7. **Related Knowledge** - Similar issues that might benefit
-    8. **Preventive Measures** - How to prevent this in future
-    9. **Next Steps** - Follow-up actions or monitoring
+    ## Root Cause Analysis
 
-    Write in professional Markdown format. This MUST document the ACTUAL RESOLUTION, not generic advice!"""
+    Enhance this section based on feedback. Provide deeper technical analysis, more context, or clearer explanations as needed. Write detailed paragraphs.
+
+    ## Solution Implementation
+
+    Improve this section significantly. Add technical depth, better explanations, or more context based on what the feedback requests.
+
+    ### Implementation Steps
+
+    Rewrite the steps to be more specific and actionable:
+    1. Detailed first step with exact commands or actions
+    2. Clear second step with specific details
+    3. Continue with all necessary steps
+    Make each step crystal clear based on the feedback.
+
+    ### Technical Details
+
+    Enhance technical content substantially:
+    - If feedback asks for code, provide complete code examples
+    - If feedback asks for configs, show exact configurations
+    - If feedback asks for more detail, add comprehensive technical information
+    - Include before/after comparisons if relevant
+
+    ## Verification Steps
+
+    Improve the testing section:
+    1. Specific test scenario with exact steps
+    2. What to verify and how
+    3. Expected results in detail
+    4. Edge cases to check
+
+    ## Business Impact
+
+    Enhance this section based on feedback. Add metrics, specific benefits, or clearer impact analysis as requested.
+
+    ## Lessons Learned
+
+    Deepen the insights section. Add more learnings, technical insights, or process improvements based on feedback.
+
+    ## Related Knowledge
+
+    Expand this section if feedback suggests. Add more references, similar issues, or documentation links.
+
+    ## Preventive Measures
+
+    Improve prevention strategies based on feedback. Be more specific about monitoring, processes, or technical safeguards.
+
+    ## Next Steps
+
+    Clarify and expand follow-up actions based on feedback.
+
+    Critical Instructions:
+    - This version MUST be significantly better than version {previous_version}
+    - Address EVERY point in the human feedback
+    - Add substantial new content, not just minor edits
+    - If feedback says "add more detail" - add LOTS of detail
+    - If feedback says "unclear" - completely rewrite for clarity
+    - If feedback requests examples - provide multiple concrete examples
+    - Write professional, technical content throughout
+    - No placeholders or generic statements"""
         
         if refinement_suggestion:
-            prompt += f"\n\nADDITIONAL REFINEMENT REQUEST:\n{str(refinement_suggestion)}"
+            prompt += f"\n\nAdditional requirement: {refinement_suggestion}"
         
         return prompt
 
