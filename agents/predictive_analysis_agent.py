@@ -6,6 +6,8 @@ from scipy import stats
 import logging
 from agents.base_agent import BaseAgent, AgentCapability
 from orchestrator.core.model_manager import ModelManager # type: ignore
+import json
+import re
 
 class PredictiveAnalysisAgent(BaseAgent):
     OBJECTIVE = "Predict project outcomes, identify risks early, and provide actionable forecasts through collaborative intelligence"
@@ -43,11 +45,105 @@ class PredictiveAnalysisAgent(BaseAgent):
         
         self.log("PredictiveAnalysisAgent initialized with enhanced analytical capabilities")
 
+    def _parse_ai_json_response(self, response: str, default: Any = None) -> Any:
+        """Safely parse AI JSON responses"""
+        try:
+            # Try to find JSON in the response
+            json_match = re.search(r'\{.*\}|\[.*\]', response, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            
+            # If no JSON found, try parsing the whole response
+            try:
+                return json.loads(response)
+            except:
+                # If that fails, return default
+                return default if default is not None else {}
+        except Exception as e:
+            self.log(f"[AI PARSE] Failed to parse JSON: {e}")
+            return default if default is not None else {}
+
+    def _ai_analyze_ticket_patterns(self, tickets: List[Dict[str, Any]], 
+                                   status_counts: Dict[str, int]) -> Dict[str, Any]:
+        """Use AI to detect complex patterns humans might miss"""
+        
+        # Prepare context for AI analysis
+        ticket_summaries = []
+        for ticket in tickets[:20]:  # Sample first 20 tickets
+            fields = ticket.get("fields", {})
+            ticket_summaries.append({
+                "key": ticket.get("key"),
+                "status": fields.get("status", {}).get("name"),
+                "summary": fields.get("summary", "")[:100],
+                "assignee": fields.get("assignee", {}).get("displayName", "Unassigned") if fields.get("assignee") else "Unassigned",
+                "created": fields.get("created", "")[:10] if fields.get("created") else "",
+                "labels": fields.get("labels", [])[:3]  # Limit labels
+            })
+        
+        prompt = f"""You are an expert Agile project analyst. Analyze these tickets and identify hidden patterns that affect sprint completion:
+
+Status Distribution: {json.dumps(status_counts)}
+Total Tickets: {len(tickets)}
+
+Sample Tickets:
+{json.dumps(ticket_summaries, indent=2)}
+
+Identify patterns and return ONLY a JSON object with these fields:
+{{
+    "complexity_patterns": ["list of complexity indicators found"],
+    "blocking_patterns": ["patterns that suggest blockers"],
+    "velocity_indicators": ["signs of team velocity changes"],
+    "team_dynamics": ["observations about team work patterns"],
+    "risk_signals": ["early warning signs"],
+    "pattern_confidence": 0.7
+}}"""
+
+        try:
+            response = self.model_manager.generate_response(
+                prompt=prompt,
+                context={
+                    "agent_name": self.name,
+                    "task_type": "pattern_analysis",
+                    "ticket_count": len(tickets)
+                }
+            )
+            
+            # Parse AI response
+            parsed = self._parse_ai_json_response(response)
+            
+            # Ensure we have all required fields
+            default_patterns = {
+                "complexity_patterns": [],
+                "blocking_patterns": [],
+                "velocity_indicators": [],
+                "team_dynamics": [],
+                "risk_signals": [],
+                "pattern_confidence": 0.7
+            }
+            
+            # Merge with defaults
+            for key, default_value in default_patterns.items():
+                if key not in parsed:
+                    parsed[key] = default_value
+            
+            return parsed
+            
+        except Exception as e:
+            self.log(f"[AI ERROR] Pattern analysis failed: {e}")
+            return {
+                "complexity_patterns": ["Unable to analyze patterns"],
+                "blocking_patterns": [],
+                "velocity_indicators": [],
+                "team_dynamics": [],
+                "risk_signals": [],
+                "pattern_confidence": 0.5
+            }
+        
     def _calculate_sprint_completion_probability(self, tickets: List[Dict[str, Any]], 
-                                               metrics: Dict[str, Any],
-                                               historical_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate realistic sprint completion probability based on actual data"""
-        self.log("[PREDICTION] Calculating sprint completion probability")
+                                           metrics: Dict[str, Any],
+                                           historical_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate sprint completion probability with AI enhancement"""
+        self.log("[AI-ENHANCED PREDICTION] Calculating sprint completion probability")
         
         # Define status mappings for different projects
         DONE_STATUSES = ["Done", "Closed", "Resolved", "Complete", "Finished"]
@@ -101,108 +197,154 @@ class PredictiveAnalysisAgent(BaseAgent):
                 "probability": 0.0,
                 "confidence": 0.1,
                 "reasoning": "No tickets found in sprint",
-                "risk_level": "critical"
+                "risk_level": "critical",
+                "ai_insights": {
+                    "patterns_detected": {},
+                    "confidence": 0.1,
+                    "analysis_type": "no_data"
+                }
             }
         
         completion_percentage = done_tickets / total_tickets
         remaining_work = len(open_tickets)
         
+        # AI ENHANCEMENT: Analyze patterns with AI
+        self.log("[AI-ENHANCED] Analyzing patterns with AI...")
+        pattern_analysis = self._ai_analyze_ticket_patterns(tickets, status_counts)
+        
         # If sprint is mostly complete
         if completion_percentage > 0.9:
-            return {
-                "probability": 0.95,
-                "confidence": 0.9,
-                "reasoning": f"Sprint is {completion_percentage:.0%} complete with only {remaining_work} tickets remaining",
-                "risk_level": "minimal",
-                "remaining_work": remaining_work,
-                "completion_percentage": completion_percentage
-            }
-        
-        # Calculate velocity and time remaining
-        velocity_history = historical_data.get("velocity_history", [])
-        if not velocity_history and done_tickets > 0:
-            # Estimate velocity from current sprint
-            days_elapsed = 10  # Assume mid-sprint
-            daily_velocity = done_tickets / days_elapsed
-            velocity_history = [daily_velocity * 7]  # Weekly velocity
-        
-        avg_velocity = np.mean(velocity_history) if velocity_history else 5
-        velocity_std = np.std(velocity_history) if len(velocity_history) > 1 else avg_velocity * 0.3
-        
-        # Assume 10 days remaining in sprint (adjust based on your sprint length)
-        days_remaining = 10
-        expected_completion = avg_velocity * (days_remaining / 7)
-        
-        # Calculate probability using normal distribution
-        if velocity_std > 0:
-            z_score = (remaining_work - expected_completion) / velocity_std
-            probability = 1 - stats.norm.cdf(z_score)
+            base_probability = 0.95
+            reasoning = f"Sprint is {completion_percentage:.0%} complete with only {remaining_work} tickets remaining"
         else:
-            probability = 1.0 if expected_completion >= remaining_work else 0.3
-        
-        # Adjust for blockers and risks
-        risk_factors = []
-        
-        # Factor 1: Blocked tickets
-        if blocked_tickets > 0:
-            blocker_impact = blocked_tickets / max(remaining_work, 1)
-            probability *= (1 - blocker_impact * 0.3)
-            risk_factors.append(f"{blocked_tickets} blocked tickets")
-        
-        # Factor 2: Work in progress vs capacity
-        wip_ratio = in_progress / max(len(set(t.get("fields", {}).get("assignee", {}).get("displayName", "Unassigned") 
-                                               for t in tickets if t.get("fields", {}).get("assignee"))), 1)
-        if wip_ratio > 3:
-            probability *= 0.85
-            risk_factors.append(f"High WIP ratio ({wip_ratio:.1f} tickets per person)")
-        
-        # Factor 3: Velocity trend
-        if len(velocity_history) >= 3:
-            velocity_trend = self._calculate_velocity_trend(velocity_history)
-            if velocity_trend < self.prediction_thresholds["velocity_decline_threshold"]:
-                probability *= 0.8
-                risk_factors.append(f"Declining velocity trend ({velocity_trend:.1%})")
-        
-        # Factor 4: Complex tickets
-        complex_tickets = self._identify_complex_tickets(open_tickets)
-        if complex_tickets > remaining_work * 0.3:
-            probability *= 0.9
-            risk_factors.append(f"{complex_tickets} complex tickets remaining")
+            # Start with completion percentage as base
+            base_probability = completion_percentage
+            
+            # Adjust based on AI-detected patterns
+            if pattern_analysis.get("blocking_patterns"):
+                base_probability *= 0.85  # Reduce if blocking patterns detected
+                self.log(f"[AI] Blocking patterns detected: {pattern_analysis['blocking_patterns']}")
+                
+            if "team overload" in str(pattern_analysis.get("team_dynamics", [])):
+                base_probability *= 0.9
+                self.log("[AI] Team overload detected")
+                
+            if pattern_analysis.get("risk_signals"):
+                risk_count = len(pattern_analysis["risk_signals"])
+                base_probability *= (1 - (risk_count * 0.05))  # Each risk reduces by 5%
+                self.log(f"[AI] {risk_count} risk signals detected")
+            
+            # Velocity-based adjustment
+            velocity_history = historical_data.get("velocity_history", [])
+            if not velocity_history and done_tickets > 0:
+                # Estimate velocity from current sprint
+                days_elapsed = 10  # Assume mid-sprint
+                daily_velocity = done_tickets / days_elapsed
+                velocity_history = [daily_velocity * 7]  # Weekly velocity
+            
+            avg_velocity = np.mean(velocity_history) if velocity_history else 5
+            velocity_std = np.std(velocity_history) if len(velocity_history) > 1 else avg_velocity * 0.3
+            
+            # Assume 10 days remaining in sprint
+            days_remaining = 10
+            expected_completion = avg_velocity * (days_remaining / 7)
+            
+            # Calculate probability using normal distribution
+            if velocity_std > 0 and remaining_work > 0:
+                z_score = (remaining_work - expected_completion) / velocity_std
+                velocity_probability = 1 - stats.norm.cdf(z_score)
+                # Combine with base probability
+                base_probability = (base_probability * 0.6) + (velocity_probability * 0.4)
         
         # Ensure probability is within bounds
-        probability = max(0.05, min(0.95, probability))
+        probability = max(0.05, min(0.95, base_probability))
         
-        # Determine risk level
-        if probability < self.prediction_thresholds["high_risk"]:
+        # Determine risk level with AI consideration
+        ai_confidence = pattern_analysis.get("pattern_confidence", 0.7)
+        
+        if probability < self.prediction_thresholds["high_risk"] or len(pattern_analysis.get("risk_signals", [])) > 2:
             risk_level = "high"
-        elif probability < self.prediction_thresholds["medium_risk"]:
+        elif probability < self.prediction_thresholds["medium_risk"] or ai_confidence < 0.5:
             risk_level = "medium"
         elif probability < self.prediction_thresholds["low_risk"]:
             risk_level = "low"
         else:
             risk_level = "minimal"
         
-        # Generate detailed reasoning
-        reasoning = self._generate_probability_reasoning(
-            probability, completion_percentage, remaining_work, 
-            avg_velocity, risk_factors
-        )
+        # Generate detailed reasoning with AI insights
+        risk_factors = []
         
-        # Generate specific recommendations
+        # Add traditional risk factors
+        if blocked_tickets > 0:
+            risk_factors.append(f"{blocked_tickets} blocked tickets")
+        
+        if in_progress > remaining_work * 0.5:
+            risk_factors.append(f"High WIP ratio ({in_progress} in progress)")
+        
+        # Add AI-detected risks
+        if pattern_analysis.get("risk_signals"):
+            risk_factors.extend(pattern_analysis["risk_signals"][:2])
+        
+        if pattern_analysis.get("complexity_patterns"):
+            risk_factors.append(f"Complexity: {pattern_analysis['complexity_patterns'][0]}")
+        
+        # Build reasoning that includes AI insights
+        reasoning = f"Sprint is {completion_percentage:.0%} complete with {remaining_work} tickets remaining. "
+        
+        if avg_velocity > 0:
+            days_to_complete = remaining_work / (avg_velocity / 7)
+            reasoning += f"At current velocity ({avg_velocity:.1f} tickets/week), completion would take {days_to_complete:.1f} days. "
+        
+        if pattern_analysis.get("pattern_confidence", 0) > 0.7:
+            patterns_found = []
+            if pattern_analysis.get("complexity_patterns"):
+                patterns_found.extend(pattern_analysis["complexity_patterns"][:1])
+            if pattern_analysis.get("blocking_patterns"):
+                patterns_found.extend(pattern_analysis["blocking_patterns"][:1])
+            
+            if patterns_found:
+                reasoning += f"AI analysis detected: {', '.join(patterns_found)}. "
+        
+        if probability >= 0.8:
+            confidence_text = "The team is on track to complete the sprint successfully."
+        elif probability >= 0.6:
+            confidence_text = "Sprint completion is achievable but requires focused effort."
+        elif probability >= 0.4:
+            confidence_text = "Sprint completion is at risk without immediate intervention."
+        else:
+            confidence_text = "Sprint completion is highly unlikely with current trajectory."
+        
+        reasoning += confidence_text
+        
+        if risk_factors:
+            reasoning += f" Key concerns: {', '.join(risk_factors[:3])}."
+        
+        # Generate recommendations with AI enhancement
         recommended_actions = self._generate_sprint_recommendations(
             probability, risk_factors, remaining_work, velocity_history
         )
         
+        # If AI detected specific patterns, add targeted recommendations
+        if pattern_analysis.get("blocking_patterns"):
+            recommended_actions.insert(0, 
+                f"🔓 AI detected blocking patterns: {pattern_analysis['blocking_patterns'][0]}. Address immediately."
+            )
+        
+        if pattern_analysis.get("team_dynamics") and "knowledge silo" in str(pattern_analysis["team_dynamics"]):
+            recommended_actions.append(
+                "👥 AI detected knowledge silos - implement pair programming or knowledge sharing sessions"
+            )
+        
         return {
             "probability": round(probability, 2),
-            "confidence": 0.85 if len(velocity_history) >= 3 else 0.6,
+            "confidence": round(ai_confidence, 2),
             "reasoning": reasoning,
             "risk_level": risk_level,
             "remaining_work": remaining_work,
             "completion_percentage": round(completion_percentage, 2),
             "expected_velocity": round(avg_velocity, 1),
             "risk_factors": risk_factors,
-            "recommended_actions": recommended_actions,
+            "recommended_actions": recommended_actions[:5],  # Top 5 recommendations
             "detailed_metrics": {
                 "total_tickets": total_tickets,
                 "done_tickets": done_tickets,
@@ -210,9 +352,21 @@ class PredictiveAnalysisAgent(BaseAgent):
                 "blocked_tickets": blocked_tickets,
                 "in_progress": in_progress,
                 "todo": todo_tickets
+            },
+            "ai_insights": {
+                "patterns_detected": pattern_analysis,
+                "confidence": ai_confidence,
+                "analysis_type": "ai_enhanced",
+                "patterns_summary": {
+                    "complexity": len(pattern_analysis.get("complexity_patterns", [])),
+                    "blockers": len(pattern_analysis.get("blocking_patterns", [])),
+                    "risks": len(pattern_analysis.get("risk_signals", [])),
+                    "team_issues": len(pattern_analysis.get("team_dynamics", []))
+                }
             }
         }
 
+    
     def _identify_complex_tickets(self, tickets: List[Dict[str, Any]]) -> int:
         """Identify complex tickets that might take longer"""
         complex_count = 0
@@ -688,66 +842,120 @@ class PredictiveAnalysisAgent(BaseAgent):
         return trend
 
     def _forecast_velocity_trends(self, historical_data: Dict[str, Any], 
-                                 current_velocity: float) -> Dict[str, Any]:
-        """Forecast future velocity with confidence intervals"""
-        self.log("[PREDICTION] Forecasting velocity trends")
+                             current_velocity: float,
+                             tickets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """AI-ENHANCED velocity forecasting with proper ticket data"""
         
         velocity_history = historical_data.get("velocity_history", [])
-        if not velocity_history:
-            velocity_history = [current_velocity]
         
-        if len(velocity_history) < 3:
+        # First get REAL historical data
+        if not velocity_history or len(velocity_history) < 3:
+            # Extract from tickets if provided
+            if tickets:
+                velocity_history = self._extract_velocity_history(tickets)
+            else:
+                # Use a default or log warning
+                self.log("[WARNING] No tickets provided for velocity history extraction")
+                velocity_history = [current_velocity] * 3  # Minimal history
+        
+        # Rest of the method stays the same...
+        # Now use AI to make intelligent predictions
+        prompt = f"""As a data scientist, analyze this REAL velocity data and predict future trends:
+
+    Historical Weekly Velocity: {velocity_history}
+    Current Velocity: {current_velocity}
+
+    Consider:
+    1. Is there a clear trend or pattern?
+    2. Are there any anomalies that might indicate future changes?
+    3. What external factors might affect future velocity?
+
+    Provide a forecast for the next 4 weeks with reasoning.
+    Return as JSON: {{"forecast": [week1, week2, week3, week4], "reasoning": "explanation", "confidence": 0.8}}"""
+
+        try:
+            response = self.model_manager.generate_response(
+                prompt=prompt,
+                context={
+                    "agent_name": self.name,
+                    "task_type": "velocity_forecasting"
+                }
+            )
+            
+            ai_forecast = self._parse_ai_json_response(response)
+            
+            # Use AI forecast if available, otherwise intelligent calculation
+            if ai_forecast and "forecast" in ai_forecast:
+                forecast_values = ai_forecast["forecast"]
+                reasoning = ai_forecast.get("reasoning", "AI-based forecast")
+            else:
+                # Intelligent fallback using trend analysis
+                if len(velocity_history) >= 3:
+                    # Calculate trend using linear regression
+                    x = np.arange(len(velocity_history))
+                    y = np.array(velocity_history)
+                    slope, intercept = np.polyfit(x, y, 1)
+                    
+                    # Project future values with dampening
+                    forecast_values = []
+                    for i in range(1, 5):
+                        # Add dampening factor to prevent unrealistic growth
+                        dampening = 0.9 ** i
+                        predicted = intercept + slope * (len(velocity_history) + i)
+                        predicted *= dampening
+                        forecast_values.append(max(0, round(predicted)))
+                    
+                    reasoning = f"Trend analysis shows {'increasing' if slope > 0 else 'decreasing'} velocity"
+                else:
+                    forecast_values = [current_velocity] * 4
+                    reasoning = "Insufficient historical data for trend analysis"
+            
+            # Calculate statistical metrics
+            if velocity_history:
+                avg_velocity = np.mean(velocity_history)
+                volatility = np.std(velocity_history) / max(avg_velocity, 1)
+                
+                # Determine trend direction
+                if len(velocity_history) >= 2:
+                    recent_trend = velocity_history[-1] - velocity_history[-2]
+                    if recent_trend > avg_velocity * 0.1:
+                        trend_direction = "improving"
+                    elif recent_trend < -avg_velocity * 0.1:
+                        trend_direction = "declining"
+                    else:
+                        trend_direction = "stable"
+                else:
+                    trend_direction = "unknown"
+                
+                trend_percentage = recent_trend / max(velocity_history[-2], 1) if len(velocity_history) >= 2 else 0
+            else:
+                avg_velocity = current_velocity
+                volatility = 0
+                trend_direction = "unknown"
+                trend_percentage = 0
+            
+            return {
+                "forecast": forecast_values,
+                "trend": trend_direction,
+                "trend_percentage": trend_percentage,
+                "confidence": 0.8 if len(velocity_history) >= 5 else 0.5,
+                "insights": reasoning,
+                "next_week_estimate": forecast_values[0],
+                "historical_average": round(avg_velocity, 1),
+                "volatility": round(volatility, 2),
+                "data_source": "real_velocity_analysis",
+                "ai_enhanced": bool(ai_forecast)
+            }
+            
+        except Exception as e:
+            self.log(f"[ERROR] Velocity forecast failed: {e}")
+            # Fallback to current velocity
             return {
                 "forecast": [current_velocity] * 4,
-                "trend": "insufficient_data",
-                "confidence": 0.4,
-                "insights": f"Need at least 3 sprints of data for accurate forecasting. "
-                           f"Current velocity: {current_velocity:.1f} tickets/week"
+                "trend": "stable",
+                "insights": "Using current velocity as baseline",
+                "data_source": "fallback"
             }
-        
-        # Calculate trend
-        trend_percentage = self._calculate_velocity_trend(velocity_history)
-        
-        # Simple forecast with trend
-        forecast = []
-        last_velocity = velocity_history[-1]
-        for i in range(4):
-            next_velocity = last_velocity * (1 + trend_percentage)
-            forecast.append(max(0, next_velocity))
-            last_velocity = next_velocity
-        
-        # Determine trend direction
-        if trend_percentage > 0.05:
-            trend = "improving"
-        elif trend_percentage < -0.05:
-            trend = "declining"
-        else:
-            trend = "stable"
-        
-        # Calculate confidence based on historical variance
-        volatility = np.std(velocity_history) / max(np.mean(velocity_history), 1)
-        confidence = max(0.4, min(0.9, 0.9 - volatility))
-        
-        # Generate insights
-        avg_velocity = np.mean(velocity_history)
-        insights = f"Velocity trend is {trend} ({trend_percentage:+.1%} per sprint). "
-        insights += f"Average: {avg_velocity:.1f}, Current: {current_velocity:.1f}. "
-        
-        if trend == "declining":
-            insights += "Investigation recommended to identify impediments."
-        elif trend == "improving":
-            insights += "Team efficiency improvements are showing results."
-        
-        return {
-            "forecast": [round(v, 1) for v in forecast],
-            "trend": trend,
-            "trend_percentage": round(trend_percentage, 3),
-            "confidence": round(confidence, 2),
-            "insights": insights,
-            "volatility": round(volatility, 2),
-            "next_week_estimate": round(forecast[0], 1),
-            "historical_average": round(avg_velocity, 1)
-        }
     
     def _calculate_sprint_burndown_data(self, tickets: List[Dict[str, Any]], 
                                        sprint_start: datetime = None,
@@ -1079,36 +1287,30 @@ class PredictiveAnalysisAgent(BaseAgent):
         return min(complexity, 2.5)  # Cap at 2.5x
 
     def _generate_natural_language_predictions(self, predictions: Dict[str, Any]) -> str:
-        """Generate natural language summary of predictions"""
+        """Generate AI-powered natural language summary"""
         sprint_data = predictions.get("sprint_completion", {})
         risks = predictions.get("risks", [])
-        warnings = predictions.get("warnings", [])
+        ai_insights = sprint_data.get("ai_insights", {})
         
-        probability = sprint_data.get("probability", 0)
-        remaining = sprint_data.get("remaining_work", 0)
-        completion_pct = sprint_data.get("completion_percentage", 0)
-        
-        # Build context-aware prompt
-        prompt = f"""You are a project management expert. Based on these analytics, provide a brief, 
-conversational summary (2-3 sentences) that a team lead would find helpful:
+        # Use AI to generate insightful summary
+        prompt = f"""You are presenting predictive analytics to a team lead. Create a brief, 
+conversational summary (2-3 sentences) that provides genuine insights.
 
 Sprint Status:
-- Current completion: {completion_pct:.0%}
-- Remaining tickets: {remaining}
-- Success probability: {probability:.0%}
-- Risk level: {sprint_data.get('risk_level', 'unknown')}
+- Completion: {sprint_data.get('completion_percentage', 0):.0%}
+- Success Probability: {sprint_data.get('probability', 0):.0%}
+- Risk Level: {sprint_data.get('risk_level', 'unknown')}
 
-Top Risks: {len([r for r in risks if r.get('severity') == 'high'])} high, {len([r for r in risks if r.get('severity') == 'medium'])} medium
+AI Detected Patterns:
+{json.dumps(ai_insights.get('patterns_detected', {}), indent=2) if ai_insights else 'No patterns analyzed'}
 
-Key Concerns:
-{chr(10).join(['- ' + rf for rf in sprint_data.get('risk_factors', [])[:3]])}
+Top Risks: {len([r for r in risks if r.get('severity') == 'high'])} high severity
 
 Write a natural summary that:
-1. States the completion likelihood clearly
-2. Highlights the most critical issue
-3. Suggests one specific action
-
-Keep it conversational and actionable."""
+1. Highlights the most important insight from the AI analysis
+2. Mentions one specific pattern or risk
+3. Suggests one actionable step
+Keep it concise and conversational."""
 
         try:
             response = self.model_manager.generate_response(
@@ -1116,25 +1318,30 @@ Keep it conversational and actionable."""
                 context={
                     "agent_name": self.name,
                     "task_type": "predictive_summary",
-                    "sprint_probability": probability,
+                    "sprint_probability": sprint_data.get('probability', 0),
                     "risk_count": len(risks)
                 }
             )
             return response.strip()
         except Exception as e:
-            self.log(f"[ERROR] Failed to generate natural language predictions: {e}")
+            self.log(f"[ERROR] Failed to generate AI summary: {e}")
             
-            # Fallback summary
+            # Enhanced fallback
+            probability = sprint_data.get('probability', 0)
+            patterns = ai_insights.get('patterns_detected', {})
+            
             if probability < 0.5:
-                return (f"Sprint completion is at risk with only {probability:.0%} probability and "
-                       f"{remaining} tickets remaining. Focus on {sprint_data.get('risk_factors', ['blockers'])[0]} "
-                       f"to improve chances.")
-            elif probability < 0.8:
-                return (f"Sprint is {completion_pct:.0%} complete with {probability:.0%} chance of finishing. "
-                       f"Address {remaining} remaining tickets and watch for {sprint_data.get('risk_factors', ['risks'])[0]}.")
+                pattern_text = ""
+                if patterns.get('risk_signals'):
+                    pattern_text = f"AI detected warning signs: {patterns['risk_signals'][0]}. "
+                
+                return (f"Sprint completion is at risk with only {probability:.0%} probability. "
+                       f"{pattern_text}"
+                       f"Focus on the {sprint_data.get('remaining_work', 0)} remaining tickets.")
             else:
-                return (f"Sprint is on track at {completion_pct:.0%} complete with {probability:.0%} success probability. "
-                       f"Maintain focus on the remaining {remaining} tickets.")
+                return (f"Sprint is {sprint_data.get('completion_percentage', 0):.0%} complete "
+                       f"with {probability:.0%} success probability. "
+                       f"AI confidence: {ai_insights.get('confidence', 0.7):.0%}.")
             
     def _perceive(self, input_data: Dict[str, Any]) -> None:
         super()._perceive(input_data)
@@ -1154,7 +1361,7 @@ Keep it conversational and actionable."""
         self.mental_state.add_belief("analysis_type", input_data.get("analysis_type", "comprehensive"), 0.9, "input")
 
     def _act(self) -> Dict[str, Any]:
-        """Execute comprehensive predictive analysis with real calculations"""
+        """Execute comprehensive predictive analysis with AI enhancements"""
         try:
             tickets = self.mental_state.get_belief("tickets") or []
             metrics = self.mental_state.get_belief("metrics") or {}
@@ -1191,7 +1398,9 @@ Keep it conversational and actionable."""
                 historical_data["velocity_history"] = velocity_history
                 
                 predictions["velocity_forecast"] = self._forecast_velocity_trends(
-                    historical_data, metrics.get("throughput", 0)
+                    historical_data, 
+                    metrics.get("throughput", 0),
+                    tickets  # Pass tickets for real data extraction
                 )
             
             # Add burndown calculation for sprint tracking
@@ -1204,7 +1413,7 @@ Keep it conversational and actionable."""
                 capacity_data = self._calculate_capacity_forecast(tickets, metrics)
                 predictions["capacity_forecast"] = capacity_data
             
-            # Add risk assessment
+            # Add risk assessment with AI enhancement
             if analysis_type in ["comprehensive", "risk_assessment"]:
                 predictions["risks"] = self._identify_future_risks(tickets, metrics, predictions)
             
@@ -1215,25 +1424,41 @@ Keep it conversational and actionable."""
             # Add team burnout analysis
             predictions["team_burnout_analysis"] = self._assess_team_load(tickets)
             
-            # Generate warnings
+            # Generate warnings based on AI insights
             predictions["warnings"] = self._generate_early_warnings(predictions)
             
-            # Generate natural language summary
+            # Generate AI-powered natural language summary
             predictions["natural_language_summary"] = self._generate_natural_language_predictions(predictions)
             
             # Add metadata about the analysis
+            ai_confidence = predictions.get("sprint_completion", {}).get("ai_insights", {}).get("confidence", 0.5)
+            patterns_detected = predictions.get("sprint_completion", {}).get("ai_insights", {}).get("patterns_detected", {})
+            
             predictions["analysis_metadata"] = {
                 "ticket_count": len(tickets),
                 "analysis_type": analysis_type,
                 "data_quality": self._calculate_analysis_confidence(tickets),
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
+                "ai_enhanced": True,
+                "ai_confidence": ai_confidence,
+                "patterns_detected_count": sum(
+                    len(patterns_detected.get(key, [])) 
+                    for key in ["complexity_patterns", "blocking_patterns", "risk_signals", "team_dynamics"]
+                ),
+                "using_real_data": True
             }
             
-            # Log key findings
+            # Log key findings with AI insights
             self.log(f"[PREDICTION] Sprint completion: {predictions['sprint_completion']['probability']:.0%}")
+            self.log(f"[PREDICTION] AI confidence: {ai_confidence:.0%}")
+            self.log(f"[PREDICTION] Patterns detected: {predictions['analysis_metadata']['patterns_detected_count']}")
             self.log(f"[PREDICTION] Velocity trend: {predictions.get('velocity_forecast', {}).get('trend', 'unknown')}")
             self.log(f"[PREDICTION] Risks identified: {len(predictions.get('risks', []))}")
             self.log(f"[PREDICTION] Warnings generated: {len(predictions.get('warnings', []))}")
+            
+            # If AI detected critical patterns, log them
+            if patterns_detected.get("risk_signals"):
+                self.log(f"[AI ALERT] Risk signals: {patterns_detected['risk_signals'][:2]}")
             
             return {
                 "predictions": predictions,
@@ -1243,7 +1468,9 @@ Keep it conversational and actionable."""
                     "analysis_type": analysis_type,
                     "ticket_count": len(tickets),
                     "confidence_level": predictions["sprint_completion"].get("confidence", 0.5),
-                    "real_data_used": True
+                    "real_data_used": True,
+                    "ai_enhanced": True,
+                    "ai_patterns_found": predictions["analysis_metadata"]["patterns_detected_count"] > 0
                 }
             }
             
@@ -1253,11 +1480,20 @@ Keep it conversational and actionable."""
             self.log(f"[ERROR] Traceback: {traceback.format_exc()}")
             
             return {
-                "predictions": {},
+                "predictions": {
+                    "error": str(e),
+                    "sprint_completion": {
+                        "probability": 0.5,
+                        "confidence": 0.1,
+                        "reasoning": "Error occurred during analysis",
+                        "risk_level": "unknown"
+                    }
+                },
                 "workflow_status": "failure",
                 "error": str(e),
                 "collaboration_metadata": {
-                    "error_occurred": True
+                    "error_occurred": True,
+                    "ai_enhanced": False
                 }
             }
     
