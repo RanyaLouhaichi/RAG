@@ -3846,6 +3846,86 @@ def get_thesis_metrics():
         }), 500
 # ADD THESE FUNCTIONS AFTER THE EXISTING HELPER FUNCTIONS (around line 600)
 # These are completely new functions to add to api_simple.py
+@app.route("/api/langsmith-metrics", methods=["GET"])
+def get_langsmith_metrics():
+    """Get LangSmith metrics for thesis presentation"""
+    try:
+        from orchestrator.monitoring.langsmith_config import langsmith_monitor # type: ignore
+        
+        # Get comprehensive metrics
+        metrics = langsmith_monitor.get_metrics_summary()
+        
+        # Export to file for thesis
+        export_file = langsmith_monitor.export_metrics_for_thesis()
+        metrics["export_file"] = export_file
+        
+        return jsonify({
+            "status": "success",
+            "langsmith_enabled": langsmith_monitor.enabled,
+            "metrics": metrics,
+            "thesis_ready": True,
+            "dashboard_url": f"https://smith.langchain.com/{os.getenv('LANGCHAIN_PROJECT', 'JURIX-Thesis-Demo')}",
+            "message": "Metrics ready for thesis presentation"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting LangSmith metrics: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
+
+@app.route("/api/langsmith-test", methods=["POST"])
+def test_langsmith_integration():
+    """Test LangSmith integration with a sample workflow"""
+    try:
+        from orchestrator.monitoring.langsmith_config import langsmith_monitor # type: ignore
+        
+        # Create test dataset
+        test_examples = [
+            {
+                "inputs": {"query": "What is the sprint velocity for project MG?"},
+                "outputs": {"expected_intent": "predictive_analysis"}
+            },
+            {
+                "inputs": {"query": "Give me recommendations for improving team productivity"},
+                "outputs": {"expected_intent": "recommendation"}
+            }
+        ]
+        
+        dataset = langsmith_monitor.create_test_dataset(
+            "JURIX_Test_Queries",
+            test_examples
+        )
+        
+        # Run a test query with full tracing
+        test_query = request.json.get("query", "Test query for LangSmith integration")
+        result = orchestrator.run_workflow(test_query)
+        
+        # Get metrics
+        metrics = langsmith_monitor.get_metrics_summary()
+        
+        return jsonify({
+            "status": "success",
+            "test_completed": True,
+            "dataset_created": dataset is not None,
+            "workflow_traced": True,
+            "metrics": metrics,
+            "dashboard_url": f"https://smith.langchain.com/{os.getenv('LANGCHAIN_PROJECT', 'JURIX-Thesis-Demo')}",
+            "result": {
+                "response": result.get("response", ""),
+                "collaboration_count": len(result.get("collaboration_trace", [])),
+                "agents_used": len(set([t["node"] for t in result.get("collaboration_trace", [])])),
+                "langsmith_metrics": result.get("langsmith_metrics", {})
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"LangSmith test failed: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
 def _generate_sprint_progress_data(tickets):
     """Generate sprint progress data for the chart"""

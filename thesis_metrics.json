@@ -1,0 +1,297 @@
+{
+  "status": "active",
+  "project": "JURIX-Thesis-Demo",
+  "total_runs": 4,
+  "agent_statistics": {
+    "total_agent_runs": 17,
+    "unique_agents": 5,
+    "agent_breakdown": {
+      "classify_intent": 4,
+      "jira_data_agent": 3,
+      "recommendation_agent": 4,
+      "chat_agent": 4,
+      "predictive_analysis_agent": 2
+    },
+    "most_active_agents": [
+      [
+        "classify_intent",
+        4
+      ],
+      [
+        "recommendation_agent",
+        4
+      ],
+      [
+        "chat_agent",
+        4
+      ],
+      [
+        "jira_data_agent",
+        3
+      ],
+      [
+        "predictive_analysis_agent",
+        2
+      ]
+    ]
+  },
+  "workflow_statistics": {
+    "total_workflow_runs": 4,
+    "workflow_breakdown": {
+      "chat_workflow": 4
+    }
+  },
+  "performance_metrics": {
+    "average_latency_seconds": 48.932,
+    "total_errors": 0,
+    "error_rate": 0.0
+  },
+  "collaboration_insights": {
+    "total_collaborations": 33,
+    "collaboration_network": {
+      "jira_data_agent \u2192 productivity_dashboard_agent": 3,
+      "recommendation_agent \u2192 knowledge_base_agent": 3,
+      "recommendation_agent \u2192 productivity_dashboard_agent": 3,
+      "recommendation_agent \u2192 jira_data_agent": 3,
+      "recommendation_agent \u2192 retrieval_agent": 6,
+      "chat_agent \u2192 knowledge_base_agent": 3,
+      "chat_agent \u2192 productivity_dashboard_agent": 3,
+      "chat_agent \u2192 jira_data_agent": 3,
+      "chat_agent \u2192 retrieval_agent": 4,
+      "predictive_analysis_agent \u2192 productivity_dashboard_agent": 2
+    },
+    "unique_collaboration_pairs": 10
+  },
+  "thesis_metrics": {
+    "system_complexity": 5,
+    "system_reliability": 1.0,
+    "collaboration_density": 1.9411764705882353,
+    "avg_response_time": 48.932
+  },
+  "export_timestamp": "2025-08-06T11:39:23.217163",
+  "raw_data": {
+    "latencies": [
+      {
+        "workflow": "chat_workflow",
+        "latency": 53.87938356399536,
+        "timestamp": "2025-08-06T11:36:43.524976"
+      },
+      {
+        "workflow": "chat_workflow",
+        "latency": 53.23678183555603,
+        "timestamp": "2025-08-06T11:37:41.307540"
+      },
+      {
+        "workflow": "chat_workflow",
+        "latency": 44.37336182594299,
+        "timestamp": "2025-08-06T11:38:30.579118"
+      },
+      {
+        "workflow": "chat_workflow",
+        "latency": 44.23933672904968,
+        "timestamp": "2025-08-06T11:39:19.187076"
+      }
+    ],
+    "errors": [],
+    "collaborations": [
+      {
+        "from": "jira_data_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:35:53.337468"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "knowledge_base_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:28.744394"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:28.744476"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "jira_data_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:28.744543"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "retrieval_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:28.744611"
+      },
+      {
+        "from": "chat_agent",
+        "to": "knowledge_base_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:43.522611"
+      },
+      {
+        "from": "chat_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:43.522711"
+      },
+      {
+        "from": "chat_agent",
+        "to": "jira_data_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:43.522781"
+      },
+      {
+        "from": "chat_agent",
+        "to": "retrieval_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:43.522843"
+      },
+      {
+        "from": "jira_data_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:36:53.809716"
+      },
+      {
+        "from": "predictive_analysis_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:07.870718"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "knowledge_base_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:30.053502"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:30.053571"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "jira_data_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:30.053645"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "retrieval_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:30.053706"
+      },
+      {
+        "from": "chat_agent",
+        "to": "knowledge_base_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:41.305613"
+      },
+      {
+        "from": "chat_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:41.305645"
+      },
+      {
+        "from": "chat_agent",
+        "to": "jira_data_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:41.305675"
+      },
+      {
+        "from": "chat_agent",
+        "to": "retrieval_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:41.305701"
+      },
+      {
+        "from": "jira_data_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:51.452819"
+      },
+      {
+        "from": "predictive_analysis_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:37:59.013879"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:38:22.156171"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "jira_data_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:38:22.156235"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "retrieval_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:38:22.156292"
+      },
+      {
+        "from": "chat_agent",
+        "to": "productivity_dashboard_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:38:30.577052"
+      },
+      {
+        "from": "chat_agent",
+        "to": "jira_data_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:38:30.577087"
+      },
+      {
+        "from": "chat_agent",
+        "to": "retrieval_agent",
+        "type": "data_analysis",
+        "timestamp": "2025-08-06T11:38:30.577119"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "retrieval_agent",
+        "type": "context_enrichment",
+        "timestamp": "2025-08-06T11:38:46.387102"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "retrieval_agent",
+        "type": "context_enrichment",
+        "timestamp": "2025-08-06T11:38:46.387135"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "knowledge_base_agent",
+        "type": "context_enrichment",
+        "timestamp": "2025-08-06T11:38:46.387163"
+      },
+      {
+        "from": "recommendation_agent",
+        "to": "retrieval_agent",
+        "type": "context_enrichment",
+        "timestamp": "2025-08-06T11:38:46.387188"
+      },
+      {
+        "from": "chat_agent",
+        "to": "knowledge_base_agent",
+        "type": "validation",
+        "timestamp": "2025-08-06T11:39:19.175276"
+      },
+      {
+        "from": "chat_agent",
+        "to": "retrieval_agent",
+        "type": "validation",
+        "timestamp": "2025-08-06T11:39:19.175312"
+      }
+    ]
+  }
+}

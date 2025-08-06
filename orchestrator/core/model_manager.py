@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import hashlib
 from collections import defaultdict
+from orchestrator.monitoring.langsmith_config import langsmith_monitor # type: ignore
 
 class ModelManager:
     """Truly Dynamic Model Manager - No Static Mappings!"""
@@ -162,6 +163,15 @@ class ModelManager:
             response = ollama.generate(model=selected_model, prompt=prompt)
             success = True
             actual_response = response["response"]
+            # Log to LangSmith
+            response_time = (datetime.now() - start_time).total_seconds()
+            langsmith_monitor.log_model_usage(
+                agent_name=agent_name,
+                model_name=selected_model,
+                prompt=prompt,
+                response=actual_response,
+                latency=response_time
+            )
         except Exception as e:
             self.logger.warning(f"❌ {selected_model} failed for {agent_name}: {e}")
             # Try fallback

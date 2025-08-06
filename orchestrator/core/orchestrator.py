@@ -23,7 +23,7 @@ from agents.jira_article_generator_agent import JiraArticleGeneratorAgent
 from agents.knowledge_base_agent import KnowledgeBaseAgent
 from agents.predictive_analysis_agent import PredictiveAnalysisAgent
 from agents.smart_suggestion_agent import SmartSuggestionAgent
-
+from orchestrator.monitoring.langsmith_config import langsmith_monitor # type: ignore
 from mcp_integration.manager import MCPManager
 
 logging.basicConfig(level=logging.INFO)
@@ -228,69 +228,101 @@ class Orchestrator:
         return self.run_workflow(query, conversation_id)
     
     def run_workflow(self, query: str, conversation_id: str = None) -> JurixState:
+        """Enhanced workflow with complete LangSmith tracing"""
         conversation_id = conversation_id or str(uuid.uuid4())
         workflow_id = f"workflow_{conversation_id}_{datetime.now().strftime('%H%M%S')}"
-    
-        # Start workflow tracking
-        self.shared_model_manager.start_workflow_tracking(workflow_id)
         
-        state = JurixState(
-            query=query,
-            intent={},
-            conversation_id=conversation_id,
-            conversation_history=[],
-            articles=[],
-            recommendations=[],
-            tickets=[],
-            status="pending",
-            response="",
-            articles_used=[],
-            workflow_status="",
-            next_agent="",
-            project=None,
-            collaboration_metadata=None,
-            final_collaboration_summary=None,
-            collaboration_insights=None,
-            collaboration_trace=None,
-            collaborative_agents_used=None,
-            predictions=None,
-            predictive_insights=None
-        )
+        # Create workflow metadata for tracing
+        workflow_metadata = {
+            "workflow_id": workflow_id,
+            "conversation_id": conversation_id,
+            "query": query[:200],  # Truncate for metadata
+            "timestamp": datetime.now().isoformat()
+        }
         
-        workflow = self._build_general_workflow()
-        final_state = None
-        
-        logger.info(f"Starting general workflow for: '{query}'")
-        
-        collaboration_trace = []
-        articles_tracking = []
-        
-        for event in workflow.stream(state):
-            for node_name, node_state in event.items():
-                collab_info = node_state.get("collaboration_metadata", {})
-                articles_count = len(node_state.get("articles", []))
-                
-                if collab_info:
-                    collaboration_trace.append({
+        # Start LangSmith workflow tracing
+        with langsmith_monitor.trace_workflow("chat_workflow", workflow_metadata) as workflow_run:
+            # Start workflow tracking
+            self.shared_model_manager.start_workflow_tracking(workflow_id)
+            
+            state = JurixState(
+                query=query,
+                intent={},
+                conversation_id=conversation_id,
+                conversation_history=[],
+                articles=[],
+                recommendations=[],
+                tickets=[],
+                status="pending",
+                response="",
+                articles_used=[],
+                workflow_status="",
+                next_agent="",
+                project=None,
+                collaboration_metadata=None,
+                final_collaboration_summary=None,
+                collaboration_insights=None,
+                collaboration_trace=None,
+                collaborative_agents_used=None,
+                predictions=None,
+                predictive_insights=None
+            )
+            
+            workflow = self._build_general_workflow()
+            final_state = None
+            
+            logger.info(f"Starting general workflow for: '{query}'")
+            
+            collaboration_trace = []
+            articles_tracking = []
+            
+            # Track each step in the workflow
+            for event in workflow.stream(state):
+                for node_name, node_state in event.items():
+                    # Log to LangSmith
+                    if workflow_run:
+                        agent_run = langsmith_monitor.trace_agent(
+                            node_name, 
+                            parent_run=workflow_run
+                        )(lambda: node_state)()
+                    
+                    collab_info = node_state.get("collaboration_metadata", {})
+                    articles_count = len(node_state.get("articles", []))
+                    
+                    if collab_info:
+                        collaboration_trace.append({
+                            "node": node_name,
+                            "collaboration": collab_info,
+                            "articles_count": articles_count
+                        })
+                        
+                        # Trace collaboration to LangSmith
+                        if workflow_run and collab_info.get("collaborating_agents"):
+                            for collab_agent in collab_info["collaborating_agents"]:
+                                langsmith_monitor.trace_collaboration(
+                                    node_name,
+                                    collab_agent,
+                                    collab_info.get("collaboration_types", ["unknown"])[0],
+                                    workflow_run
+                                )
+                    
+                    articles_tracking.append({
                         "node": node_name,
-                        "collaboration": collab_info,
                         "articles_count": articles_count
                     })
+                    
+                    final_state = node_state
+            
+            if final_state:
+                final_state["collaboration_trace"] = collaboration_trace
+                final_state["articles_tracking"] = articles_tracking
+                workflow_summary = self.shared_model_manager.get_workflow_summary()
+                final_state["model_usage_summary"] = workflow_summary
                 
-                articles_tracking.append({
-                    "node": node_name,
-                    "articles_count": articles_count
-                })
-                
-                final_state = node_state
-        
-        if final_state:
-            final_state["collaboration_trace"] = collaboration_trace
-            final_state["articles_tracking"] = articles_tracking
-            workflow_summary = self.shared_model_manager.get_workflow_summary()
-            final_state["model_usage_summary"] = workflow_summary
-        
-        return final_state or state
+                # Add LangSmith metrics to final state
+                final_state["langsmith_metrics"] = langsmith_monitor.get_metrics_summary()
+            
+            return final_state or state
     
     
     # In orchestrator.py - update _build_general_workflow method
