@@ -1,3 +1,4 @@
+# orchestrator/core/orchestrator.py - COMPLETE VERSION WITH FULL LANGSMITH INTEGRATION
 import json
 import re
 import sys
@@ -30,7 +31,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Orchestrator")
 
 class Orchestrator:
-    """Single orchestrator that handles all workflows"""
+    """Single orchestrator that handles all workflows with COMPLETE LangSmith integration"""
     
     def __init__(self):
         self.shared_memory = JurixSharedMemory()
@@ -39,7 +40,7 @@ class Orchestrator:
         from orchestrator.core.model_manager import ModelManager # type: ignore
         self.shared_model_manager = ModelManager(redis_client=self.shared_memory.redis_client)
         
-        # Pass the shared model manager to all agents
+        # Initialize all agents with shared model manager
         self.chat_agent = ChatAgent(self.shared_memory)
         self.chat_agent.model_manager = self.shared_model_manager
         
@@ -64,14 +65,6 @@ class Orchestrator:
         
         self.predictive_analysis_agent = PredictiveAnalysisAgent(redis_client=self.shared_memory.redis_client)
         self.predictive_analysis_agent.model_manager = self.shared_model_manager
-        
-        self.chat_agent = ChatAgent(self.shared_memory)
-        self.recommendation_agent = RecommendationAgent(self.shared_memory)
-        self.jira_data_agent = JiraDataAgent(redis_client=self.shared_memory.redis_client)
-        self.productivity_dashboard_agent = ProductivityDashboardAgent(redis_client=self.shared_memory.redis_client)
-        self.jira_article_generator = JiraArticleGeneratorAgent(self.shared_memory)
-        self.knowledge_base = KnowledgeBaseAgent(self.shared_memory)
-        self.predictive_analysis_agent = PredictiveAnalysisAgent(redis_client=self.shared_memory.redis_client)
 
         self.smart_suggestion_agent = SmartSuggestionAgent(self.shared_memory)
         self.smart_suggestion_agent.model_manager = self.shared_model_manager
@@ -98,14 +91,11 @@ class Orchestrator:
         self.mcp_manager = MCPManager(self)
         self.mcp_connected = False
         
-        logger.info("Orchestrator initialized (MCP not connected yet)")
-        
-        logger.info("Orchestrator initialized with all agents including predictive analysis")
+        logger.info("✅ Orchestrator initialized with FULL LangSmith integration for thesis metrics")
 
     async def connect_mcp(self):
         """Connect to MCP servers if available"""
         try:
-            # Try to connect to MCP servers
             await self.mcp_manager.connect_clients()
             self.mcp_connected = True
             logger.info("Successfully connected to MCP servers")
@@ -136,11 +126,9 @@ class Orchestrator:
         try:
             from agents.enhanced_retrieval_agent import EnhancedRetrievalAgent
             
-            # Replace the standard retrieval agent
             self.enhanced_retrieval_agent = EnhancedRetrievalAgent(self.shared_memory)
             self.enhanced_retrieval_agent.model_manager = self.shared_model_manager
             
-            # Update the registry
             self.agents_registry["retrieval_agent"] = self.enhanced_retrieval_agent
             self.agents_registry["enhanced_retrieval_agent"] = self.enhanced_retrieval_agent
             
@@ -161,7 +149,6 @@ class Orchestrator:
 
     def sync_jira_to_knowledge_graph(self, project_key: str):
         """Sync Jira tickets to knowledge graph"""
-        # Get tickets
         result = self.jira_data_agent.run({'project_id': project_key})
         tickets = result.get('tickets', [])
         
@@ -170,73 +157,17 @@ class Orchestrator:
         else:
             return {"status": "error", "error": "No tickets or Enhanced RAG not enabled"}
     
-    # Enhanced run_workflow to use MCP when available
-    async def run_workflow_mcp(self, query: str, conversation_id: str = None) -> JurixState:
-        """Run workflow using MCP if available"""
-        conversation_id = conversation_id or str(uuid.uuid4())
-        
-        # Check if MCP is available
-        mcp_status = self.get_mcp_status()
-        if mcp_status["connected_clients"] > 0:
-            logger.info("Running workflow with MCP integration")
-            
-            # Use MCP client to coordinate agents
-            try:
-                # Retrieve tickets if needed
-                project_match = re.search(r'\b[A-Z]{2,}\b', query)
-                project_id = project_match.group() if project_match else None
-                
-                tickets = []
-                if project_id:
-                    tickets = await self.mcp_manager.agent_client.retrieve_tickets(project_id)
-                
-                # Get recommendations
-                recommendations = await self.mcp_manager.agent_client.get_recommendations(
-                    query, project_id, tickets
-                )
-                
-                # Search for articles
-                articles = await self.mcp_manager.agent_client.search_articles(query)
-                
-                # Generate response
-                response = await self.mcp_manager.agent_client.generate_response(
-                    query,
-                    {
-                        "session_id": conversation_id,
-                        "articles": articles,
-                        "recommendations": recommendations,
-                        "tickets": tickets
-                    }
-                )
-                
-                return JurixState(
-                    query=query,
-                    conversation_id=conversation_id,
-                    response=response,
-                    articles=articles,
-                    recommendations=recommendations,
-                    tickets=tickets,
-                    workflow_status="completed",
-                    mcp_used=True
-                )
-                
-            except Exception as e:
-                logger.error(f"MCP workflow failed: {e}")
-                # Fall back to regular workflow
-        
-        # Use regular workflow
-        return self.run_workflow(query, conversation_id)
-    
     def run_workflow(self, query: str, conversation_id: str = None) -> JurixState:
-        """Enhanced workflow with complete LangSmith tracing"""
+        """Enhanced workflow with COMPLETE LangSmith tracing"""
         conversation_id = conversation_id or str(uuid.uuid4())
         workflow_id = f"workflow_{conversation_id}_{datetime.now().strftime('%H%M%S')}"
         
         # Create workflow metadata for tracing
         workflow_metadata = {
             "workflow_id": workflow_id,
+            "workflow_type": "chat_workflow",
             "conversation_id": conversation_id,
-            "query": query[:200],  # Truncate for metadata
+            "query": query[:200],
             "timestamp": datetime.now().isoformat()
         }
         
@@ -271,7 +202,7 @@ class Orchestrator:
             workflow = self._build_general_workflow()
             final_state = None
             
-            logger.info(f"Starting general workflow for: '{query}'")
+            logger.info(f"🎬 Starting chat workflow for: '{query}' with LangSmith tracing")
             
             collaboration_trace = []
             articles_tracking = []
@@ -322,15 +253,379 @@ class Orchestrator:
                 # Add LangSmith metrics to final state
                 final_state["langsmith_metrics"] = langsmith_monitor.get_metrics_summary()
             
+            logger.info(f"✅ Chat workflow completed with LangSmith metrics")
             return final_state or state
     
+    def run_productivity_workflow(self, project_id: str, time_range: Dict[str, str], 
+                                 conversation_id: str = None, force_fresh: bool = False) -> JurixState:
+        """Productivity workflow with COMPLETE LangSmith tracing"""
+        conversation_id = conversation_id or str(uuid.uuid4())
+        workflow_id = f"productivity_{project_id}_{datetime.now().strftime('%H%M%S')}"
+        
+        # Create workflow metadata for tracing
+        workflow_metadata = {
+            "workflow_id": workflow_id,
+            "workflow_type": "productivity_analysis",
+            "project_id": project_id,
+            "conversation_id": conversation_id,
+            "time_range": time_range,
+            "force_fresh": force_fresh,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Start LangSmith workflow tracing
+        with langsmith_monitor.trace_workflow("productivity_workflow", workflow_metadata) as workflow_run:
+            # Start workflow tracking
+            self.shared_model_manager.start_workflow_tracking(workflow_id)
+            
+            state = JurixState(
+                query=f"Generate productivity analysis for {project_id}",
+                intent={"intent": "productivity_analysis", "project": project_id},
+                conversation_id=conversation_id,
+                conversation_history=[],
+                articles=[],
+                recommendations=[],
+                status="pending",
+                response="",
+                articles_used=[],
+                workflow_status="",
+                next_agent="",
+                project=project_id,
+                project_id=project_id,
+                time_range=time_range,
+                tickets=[],
+                metrics={},
+                visualization_data={},
+                report="",
+                metadata={},
+                ticket_id="",
+                article={},
+                redundant=False,
+                refinement_suggestion=None,
+                approved=False,
+                refinement_count=0,
+                has_refined=False,
+                iteration_count=0,
+                workflow_stage="",
+                recommendation_id=None,
+                workflow_history=[],
+                error=None,
+                recommendation_status=None,
+                dashboard_id=None,
+                collaboration_metadata=None,
+                final_collaboration_summary=None,
+                collaboration_insights=None,
+                collaboration_trace=None,
+                collaborative_agents_used=None,
+                predictions=None,
+                predictive_insights=None,
+                force_fresh_data=force_fresh
+            )
+            
+            logger.info(f"🎬 Starting productivity workflow for {project_id} with LangSmith tracing")
+            
+            workflow = self._build_productivity_workflow()
+            final_state = state
+            collaboration_trace = []
+            
+            for event in workflow.stream(state):
+                for node_name, node_state in event.items():
+                    # Log to LangSmith
+                    if workflow_run:
+                        agent_run = langsmith_monitor.trace_agent(
+                            node_name,
+                            parent_run=workflow_run
+                        )(lambda: node_state)()
+                    
+                    collab_metadata = node_state.get("collaboration_metadata", {})
+                    if collab_metadata:
+                        collaboration_trace.append({
+                            "node": node_name,
+                            "collaboration": collab_metadata,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        
+                        # Trace collaboration to LangSmith
+                        if workflow_run and collab_metadata.get("collaborating_agents"):
+                            for collab_agent in collab_metadata["collaborating_agents"]:
+                                langsmith_monitor.trace_collaboration(
+                                    node_name,
+                                    collab_agent,
+                                    collab_metadata.get("collaboration_types", ["productivity"])[0],
+                                    workflow_run
+                                )
+                    
+                    final_state = node_state
+            
+            final_state["collaboration_trace"] = collaboration_trace
+            final_state["langsmith_metrics"] = langsmith_monitor.get_metrics_summary()
+            final_state["model_usage_summary"] = self.shared_model_manager.get_workflow_summary()
+            
+            logger.info(f"✅ Productivity workflow completed with LangSmith metrics")
+            return final_state
     
-    # In orchestrator.py - update _build_general_workflow method
+    def run_jira_workflow(self, ticket_id: str, conversation_id: str = None, project_id: str = "PROJ123") -> JurixState:
+        """JIRA workflow with COMPLETE LangSmith tracing"""
+        conversation_id = conversation_id or str(uuid.uuid4())
+        workflow_id = f"jira_{ticket_id}_{datetime.now().strftime('%H%M%S')}"
+        
+        # Create workflow metadata for tracing
+        workflow_metadata = {
+            "workflow_id": workflow_id,
+            "workflow_type": "jira_article_generation",
+            "ticket_id": ticket_id,
+            "project_id": project_id,
+            "conversation_id": conversation_id,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Start LangSmith workflow tracing
+        with langsmith_monitor.trace_workflow("jira_workflow", workflow_metadata) as workflow_run:
+            # Start workflow tracking
+            self.shared_model_manager.start_workflow_tracking(workflow_id)
+            
+            state = JurixState(
+                query=f"Generate comprehensive article for ticket {ticket_id}",
+                intent={"intent": "article_generation", "project": project_id},
+                conversation_id=conversation_id,
+                conversation_history=[],
+                articles=[],
+                recommendations=[],
+                status="pending",
+                response="",
+                articles_used=[],
+                workflow_status="",
+                next_agent="",
+                project=project_id,
+                ticket_id=ticket_id,
+                article={},
+                redundant=False,
+                refinement_suggestion=None,
+                approved=False,
+                refinement_count=0,
+                has_refined=False,
+                iteration_count=0,
+                workflow_stage="started",
+                recommendation_id=None,
+                workflow_history=[],
+                autonomous_refinement_done=False,
+                collaboration_metadata=None,
+                final_collaboration_summary=None,
+                collaboration_insights=None,
+                collaboration_trace=None,
+                collaborative_agents_used=None,
+                predictions=None,
+                predictive_insights=None
+            )
+            
+            logger.info(f"🎬 Starting JIRA workflow for ticket {ticket_id} with LangSmith tracing")
+            
+            # Get recommendations with tracing
+            if workflow_run:
+                rec_run = langsmith_monitor.trace_agent(
+                    "recommendation_agent_pre",
+                    parent_run=workflow_run
+                )(self._run_jira_recommendation_agent)
+                recommendation_id, recommendations = rec_run(state)
+            else:
+                recommendation_id, recommendations = self._run_jira_recommendation_agent(state)
+            
+            state["recommendation_id"] = recommendation_id
+            state["recommendations"] = recommendations
+            
+            workflow = self._build_jira_workflow()
+            final_state = state
+            collaboration_trace = []
+            
+            for event in workflow.stream(state):
+                for node_name, node_state in event.items():
+                    # Log to LangSmith
+                    if workflow_run:
+                        agent_run = langsmith_monitor.trace_agent(
+                            node_name,
+                            parent_run=workflow_run
+                        )(lambda: node_state)()
+                    
+                    collab_metadata = node_state.get("collaboration_metadata", {})
+                    if collab_metadata:
+                        collaboration_trace.append({
+                            "node": node_name,
+                            "collaboration": collab_metadata,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        
+                        # Trace collaboration
+                        if workflow_run and collab_metadata.get("collaborating_agents"):
+                            for collab_agent in collab_metadata["collaborating_agents"]:
+                                langsmith_monitor.trace_collaboration(
+                                    node_name,
+                                    collab_agent,
+                                    "article_generation",
+                                    workflow_run
+                                )
+                    
+                    final_state = node_state
+                    
+                    # Handle recommendation refinement with tracing
+                    if (node_name == "jira_article_generator" and 
+                        final_state.get("article") and 
+                        "provide more project-specific details" in str(final_state.get("recommendations", []))):
+                        
+                        if workflow_run:
+                            rec_refine_run = langsmith_monitor.trace_agent(
+                                "recommendation_agent_refine",
+                                parent_run=workflow_run
+                            )(self._run_jira_recommendation_agent)
+                            
+                            final_state_dict = dict(final_state)
+                            final_state_dict["article"] = final_state.get("article", {})
+                            recommendation_id, recommendations = rec_refine_run(final_state_dict)
+                        else:
+                            final_state_dict = dict(final_state)
+                            final_state_dict["article"] = final_state.get("article", {})
+                            recommendation_id, recommendations = self._run_jira_recommendation_agent(final_state_dict)
+                        
+                        final_state["recommendation_id"] = recommendation_id
+                        final_state["recommendations"] = recommendations
+            
+            final_state["collaboration_trace"] = collaboration_trace
+            final_state["langsmith_metrics"] = langsmith_monitor.get_metrics_summary()
+            final_state["model_usage_summary"] = self.shared_model_manager.get_workflow_summary()
+            
+            logger.info(f"✅ JIRA workflow completed with LangSmith metrics")
+            return final_state
+    
+    def run_predictive_workflow(self, project_id: str, analysis_type: str = "comprehensive", 
+                              conversation_id: str = None) -> JurixState:
+        """Predictive workflow with COMPLETE LangSmith tracing"""
+        conversation_id = conversation_id or str(uuid.uuid4())
+        workflow_id = f"predictive_{project_id}_{datetime.now().strftime('%H%M%S')}"
+        
+        # Create workflow metadata for tracing
+        workflow_metadata = {
+            "workflow_id": workflow_id,
+            "workflow_type": "predictive_analysis",
+            "project_id": project_id,
+            "analysis_type": analysis_type,
+            "conversation_id": conversation_id,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # Start LangSmith workflow tracing
+        with langsmith_monitor.trace_workflow("predictive_workflow", workflow_metadata) as workflow_run:
+            # Start workflow tracking
+            self.shared_model_manager.start_workflow_tracking(workflow_id)
+            
+            state = JurixState(
+                query=f"Generate predictive analysis for {project_id}",
+                intent={"intent": "predictive_analysis", "project": project_id},
+                conversation_id=conversation_id,
+                conversation_history=[],
+                articles=[],
+                recommendations=[],
+                status="pending",
+                response="",
+                articles_used=[],
+                workflow_status="",
+                next_agent="",
+                project=project_id,
+                project_id=project_id,
+                time_range={
+                    "start": "2025-05-01T00:00:00Z",
+                    "end": "2025-05-17T23:59:59Z"
+                },
+                tickets=[],
+                metrics={},
+                visualization_data={},
+                report="",
+                metadata={},
+                ticket_id="",
+                article={},
+                redundant=False,
+                refinement_suggestion=None,
+                approved=False,
+                refinement_count=0,
+                has_refined=False,
+                iteration_count=0,
+                workflow_stage="",
+                recommendation_id=None,
+                workflow_history=[],
+                error=None,
+                recommendation_status=None,
+                dashboard_id=None,
+                collaboration_metadata=None,
+                final_collaboration_summary=None,
+                collaboration_insights=None,
+                collaboration_trace=None,
+                collaborative_agents_used=None,
+                predictions=None,
+                predictive_insights=None,
+                analysis_type=analysis_type
+            )
+            
+            logger.info(f"🎬 Starting predictive workflow for {project_id} with LangSmith tracing")
+            
+            workflow = self._build_predictive_workflow()
+            final_state = state
+            collaboration_trace = []
+            
+            for event in workflow.stream(state):
+                for node_name, node_state in event.items():
+                    # Log to LangSmith
+                    if workflow_run:
+                        agent_run = langsmith_monitor.trace_agent(
+                            node_name,
+                            parent_run=workflow_run
+                        )(lambda: node_state)()
+                    
+                    collab_metadata = node_state.get("collaboration_metadata", {})
+                    if collab_metadata:
+                        collaboration_trace.append({
+                            "node": node_name,
+                            "collaboration": collab_metadata,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                        
+                        # Trace collaboration
+                        if workflow_run and collab_metadata.get("collaborating_agents"):
+                            for collab_agent in collab_metadata["collaborating_agents"]:
+                                langsmith_monitor.trace_collaboration(
+                                    node_name,
+                                    collab_agent,
+                                    "predictive_analysis",
+                                    workflow_run
+                                )
+                    
+                    final_state = node_state
+            
+            final_state["collaboration_trace"] = collaboration_trace
+            final_state["langsmith_metrics"] = langsmith_monitor.get_metrics_summary()
+            final_state["model_usage_summary"] = self.shared_model_manager.get_workflow_summary()
+            
+            logger.info(f"✅ Predictive workflow completed with LangSmith metrics")
+            return final_state
 
+    def publish_article_to_confluence(self, article: Dict[str, Any], ticket_id: str, project_key: str) -> Dict[str, Any]:
+        """Delegate article publishing to the RAG pipeline"""
+        try:
+            if not hasattr(self, 'enhanced_retrieval_agent'):
+                self.logger.error("Enhanced RAG not enabled. Call enable_enhanced_rag() first")
+                return {"status": "error", "error": "Enhanced RAG not enabled"}
+            
+            return self.enhanced_retrieval_agent.rag_pipeline.publish_article_to_confluence(
+                article=article,
+                ticket_id=ticket_id,
+                project_key=project_key
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Failed to publish article: {e}", exc_info=True)
+            return {"status": "error", "error": str(e)}
+
+    # Keep all the existing workflow building methods unchanged
     def _build_general_workflow(self):
         workflow = StateGraph(JurixState)
         
-        # Add all nodes
         workflow.add_node("classify_intent", self._classify_intent_node)
         workflow.add_node("jira_data_agent", self._collaborative_data_node)
         workflow.add_node("recommendation_agent", self._collaborative_recommendation_node)
@@ -338,7 +633,6 @@ class Orchestrator:
         workflow.add_node("predictive_analysis_agent", self._collaborative_predictive_node)
         workflow.add_node("chat_agent", self._collaborative_chat_node)
 
-        # Set entry point
         workflow.set_entry_point("classify_intent")
 
         def route_from_intent(state: JurixState) -> str:
@@ -366,12 +660,10 @@ class Orchestrator:
                 return "chat_agent"
 
         def route_after_jira_data(state: JurixState) -> str:
-            # First check for explicit flag
             if state.get("requires_predictive_analysis"):
                 logger.info("[ROUTING] From jira_data → predictive_analysis_agent (flag detected)")
                 return "predictive_analysis_agent"
             
-            # Fallback to checking original intent
             intent_data = state.get("intent", {})
             original_intent = intent_data.get("intent", "") if isinstance(intent_data, dict) else ""
             
@@ -382,13 +674,8 @@ class Orchestrator:
             logger.info("[ROUTING] From jira_data → recommendation_agent (default)")
             return "recommendation_agent"
 
-        # Add conditional edges
         workflow.add_conditional_edges("classify_intent", route_from_intent)
-        
-        # Make the edge from jira_data_agent conditional based on original intent
         workflow.add_conditional_edges("jira_data_agent", route_after_jira_data)
-        
-        # Continue with other edges
         workflow.add_edge("predictive_analysis_agent", "recommendation_agent")
         workflow.add_edge("recommendation_agent", "chat_agent")
         workflow.add_edge("retrieval_agent", "chat_agent")
@@ -396,14 +683,78 @@ class Orchestrator:
 
         return workflow.compile()
 
+    def _build_productivity_workflow(self):
+        workflow = StateGraph(JurixState)
+        
+        workflow.add_node("jira_data_agent", self._productivity_jira_data_node)
+        workflow.add_node("recommendation_agent", self._productivity_recommendation_node)
+        workflow.add_node("predictive_analysis_agent", self._productivity_predictive_node)
+        workflow.add_node("productivity_dashboard_agent", self._productivity_dashboard_node)
+        
+        workflow.set_entry_point("jira_data_agent")
+        
+        workflow.add_edge("jira_data_agent", "predictive_analysis_agent")
+        workflow.add_edge("predictive_analysis_agent", "recommendation_agent")
+        workflow.add_edge("recommendation_agent", "productivity_dashboard_agent")
+        workflow.add_edge("productivity_dashboard_agent", END)
+        
+        def handle_error(state: JurixState) -> str:
+            if state["workflow_status"] == "failure":
+                return END
+            return "predictive_analysis_agent"
+        
+        workflow.add_conditional_edges("jira_data_agent", handle_error)
+        
+        return workflow.compile()
+
+    def _build_jira_workflow(self):
+        workflow = StateGraph(JurixState)
+        
+        workflow.add_node("jira_article_generator", self._jira_article_generator_node)
+        workflow.add_node("knowledge_base", self._knowledge_base_node)
+
+        workflow.set_entry_point("jira_article_generator")
+
+        def route(state: JurixState) -> str:
+            logger.info(f"[ROUTING] Current state: {state.get('workflow_stage')}")
+            
+            if state.get("workflow_status") == "failure":
+                logger.info("[ROUTING] Article generation failed - ending workflow")
+                return END
+            
+            if state.get("workflow_stage") == "article_generated":
+                logger.info("[ROUTING] Article generated - going to validation")
+                return "knowledge_base"
+            
+            logger.info("[ROUTING] Validation complete - ending workflow")
+            return END
+
+        workflow.add_conditional_edges("jira_article_generator", route)
+        workflow.add_edge("knowledge_base", END)
+
+        return workflow.compile()
+
+    def _build_predictive_workflow(self):
+        workflow = StateGraph(JurixState)
+        
+        workflow.add_node("jira_data_agent", self._predictive_jira_data_node)
+        workflow.add_node("predictive_analysis_agent", self._predictive_analysis_node)
+        workflow.add_node("recommendation_agent", self._predictive_recommendation_node)
+        
+        workflow.set_entry_point("jira_data_agent")
+        
+        workflow.add_edge("jira_data_agent", "predictive_analysis_agent")
+        workflow.add_edge("predictive_analysis_agent", "recommendation_agent")
+        workflow.add_edge("recommendation_agent", END)
+        
+        return workflow.compile()
+
+    # All the node methods remain the same
     def _ensure_real_project(self, state: JurixState) -> JurixState:
-        """Ensure we have a real project, not mock PROJ123"""
         project = state.get("project") or state.get("project_id")
         
-        # If no project specified or it's the mock project
         if not project or project == "PROJ123":
             if self.jira_data_agent.use_real_api and self.jira_data_agent.available_projects:
-                # Use first available real project
                 project = self.jira_data_agent.available_projects[0]
                 state["project"] = project
                 state["project_id"] = project
@@ -413,20 +764,15 @@ class Orchestrator:
         
         return state
     
-    # In orchestrator.py, add logging to see the flow
     def _classify_intent_node(self, state: JurixState) -> JurixState:
-        """Classify intent and extract project"""
         query = state.get("query", "")
         history = state.get("conversation_history", [])
         
-        # Call the intent classifier
         intent_result = classify_intent(query, history)
         
-        # Create updated state
         updated_state = state.copy()
         updated_state["intent"] = intent_result
         
-        # Ensure project is set if found
         if intent_result.get("project"):
             updated_state["project"] = intent_result["project"]
         
@@ -442,7 +788,6 @@ class Orchestrator:
             logger.warning("No project specified for data retrieval")
             return state.copy()
         
-        # Check if this is for predictive analysis BEFORE running collaboration
         intent_data = state.get("intent", {})
         is_predictive = intent_data.get("intent") == "predictive_analysis" if isinstance(intent_data, dict) else False
         
@@ -467,11 +812,9 @@ class Orchestrator:
         updated_state = state.copy()
         updated_state["tickets"] = result.get("tickets", [])
 
-        # DEBUG: Verify tickets are in state
         logger.info(f"[DATA NODE DEBUG] Tickets in result: {len(result.get('tickets', []))}")
         logger.info(f"[DATA NODE DEBUG] Tickets in updated_state: {len(updated_state.get('tickets', []))}")
         
-        # IMPORTANT: Set a flag for predictive analysis routing
         if is_predictive:
             updated_state["requires_predictive_analysis"] = True
             logger.info(f"[DATA NODE] Marked state for predictive analysis routing")
@@ -482,25 +825,6 @@ class Orchestrator:
             updated_state["collaboration_metadata"] = merged_collab
         
         return updated_state
-    
-    def publish_article_to_confluence(self, article: Dict[str, Any], ticket_id: str, project_key: str) -> Dict[str, Any]:
-        """Delegate article publishing to the RAG pipeline"""
-        try:
-            if not hasattr(self, 'enhanced_retrieval_agent'):
-                self.logger.error("Enhanced RAG not enabled. Call enable_enhanced_rag() first")
-                return {"status": "error", "error": "Enhanced RAG not enabled"}
-            
-            # Delegate to the RAG pipeline
-            return self.enhanced_retrieval_agent.rag_pipeline.publish_article_to_confluence(
-                article=article,
-                ticket_id=ticket_id,
-                project_key=project_key
-            )
-            
-        except Exception as e:
-            self.logger.error(f"Failed to publish article: {e}", exc_info=True)
-            return {"status": "error", "error": str(e)}
-
     
     def _collaborative_recommendation_node(self, state: JurixState) -> JurixState:
         def run_collaboration():
@@ -574,40 +898,34 @@ class Orchestrator:
     
     def _collaborative_predictive_node(self, state: JurixState) -> JurixState:
         logger.info("Running predictive analysis node")
-        # DEBUG: Check what's in the state
         tickets_in_state = state.get("tickets", [])
         logger.info(f"[PREDICTIVE NODE DEBUG] Tickets in state: {len(tickets_in_state)}")
         logger.info(f"[PREDICTIVE NODE DEBUG] State keys: {list(state.keys())}")
         
         def run_collaboration():
-            # Extract data from state
             tickets = state.get("tickets", [])
             
-            # Build metrics from tickets if not already present
             if not state.get("metrics"):
-                # Calculate metrics from tickets
                 done_tickets = len([t for t in tickets if t.get("fields", {}).get("status", {}).get("name") in ["Done", "Closed", "Resolved"]])
                 in_progress = len([t for t in tickets if t.get("fields", {}).get("status", {}).get("name") == "In Progress"])
                 to_do = len([t for t in tickets if t.get("fields", {}).get("status", {}).get("name") in ["Open", "To Do", "Reopened"]])
                 
                 metrics = {
                     "throughput": done_tickets,
-                    "cycle_time": 5,  # Default value
+                    "cycle_time": 5,
                     "workload": {},
                     "bottlenecks": {"To Do": to_do, "In Progress": in_progress}
                 }
             else:
                 metrics = state.get("metrics", {})
             
-            # Build historical data
             historical_data = {}
             if tickets:
                 velocity_history = self._extract_velocity_history(tickets)
                 historical_data["velocity_history"] = velocity_history
             
-            # CRITICAL: Pass the tickets in the task_context
             task_context = {
-                "tickets": tickets,  # Make sure tickets are passed here
+                "tickets": tickets,
                 "metrics": metrics,
                 "historical_data": historical_data,
                 "user_query": state["query"],
@@ -754,108 +1072,13 @@ class Orchestrator:
         
         return merged
     
-    def run_productivity_workflow(self, project_id: str, time_range: Dict[str, str], conversation_id: str = None, force_fresh: bool = False) -> JurixState:
-        conversation_id = conversation_id or str(uuid.uuid4())
-        
-        state = JurixState(
-            query=f"Generate productivity analysis for {project_id}",
-            intent={"intent": "productivity_analysis", "project": project_id},
-            conversation_id=conversation_id,
-            conversation_history=[],
-            articles=[],
-            recommendations=[],
-            status="pending",
-            response="",
-            articles_used=[],
-            workflow_status="",
-            next_agent="",
-            project=project_id,
-            project_id=project_id,
-            time_range=time_range,
-            tickets=[],
-            metrics={},
-            visualization_data={},
-            report="",
-            metadata={},
-            ticket_id="",
-            article={},
-            redundant=False,
-            refinement_suggestion=None,
-            approved=False,
-            refinement_count=0,
-            has_refined=False,
-            iteration_count=0,
-            workflow_stage="",
-            recommendation_id=None,
-            workflow_history=[],
-            error=None,
-            recommendation_status=None,
-            dashboard_id=None,
-            collaboration_metadata=None,
-            final_collaboration_summary=None,
-            collaboration_insights=None,
-            collaboration_trace=None,
-            collaborative_agents_used=None,
-            predictions=None,
-            predictive_insights=None,
-            force_fresh_data=force_fresh  # NEW: Add this flag
-        )
-        
-        logger.info(f"Starting productivity workflow for {project_id} (force_fresh={force_fresh})")
-        
-        workflow = self._build_productivity_workflow()
-        final_state = state
-        
-        collaboration_trace = []
-        
-        for event in workflow.stream(state):
-            for node_name, node_state in event.items():
-                collab_metadata = node_state.get("collaboration_metadata", {})
-                if collab_metadata:
-                    collaboration_trace.append({
-                        "node": node_name,
-                        "collaboration": collab_metadata,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                
-                final_state = node_state
-        
-        final_state["collaboration_trace"] = collaboration_trace
-        
-        return final_state
-    
-    def _build_productivity_workflow(self):
-        workflow = StateGraph(JurixState)
-        
-        workflow.add_node("jira_data_agent", self._productivity_jira_data_node)
-        workflow.add_node("recommendation_agent", self._productivity_recommendation_node)
-        workflow.add_node("predictive_analysis_agent", self._productivity_predictive_node)
-        workflow.add_node("productivity_dashboard_agent", self._productivity_dashboard_node)
-        
-        workflow.set_entry_point("jira_data_agent")
-        
-        workflow.add_edge("jira_data_agent", "predictive_analysis_agent")
-        workflow.add_edge("predictive_analysis_agent", "recommendation_agent")
-        workflow.add_edge("recommendation_agent", "productivity_dashboard_agent")
-        workflow.add_edge("productivity_dashboard_agent", END)
-        
-        def handle_error(state: JurixState) -> str:
-            if state["workflow_status"] == "failure":
-                return END
-            return "predictive_analysis_agent"
-        
-        workflow.add_conditional_edges("jira_data_agent", handle_error)
-        
-        return workflow.compile()
-    
     def _productivity_jira_data_node(self, state: JurixState) -> JurixState:
         input_data = {
             "project_id": state["project_id"],
             "analysis_depth": "enhanced",
-            "workflow_context": "productivity_analysis"  # This triggers fresh data load
+            "workflow_context": "productivity_analysis"
         }
         
-        # NEW: Add flag to force fresh data for real-time updates
         if state.get("force_fresh_data"):
             self.jira_data_agent.mental_state.add_belief("force_fresh_data", True, 0.9, "realtime")
         
@@ -1037,115 +1260,6 @@ class Orchestrator:
         
         return updated_state
     
-    def run_jira_workflow(self, ticket_id: str, conversation_id: str = None, project_id: str = "PROJ123") -> JurixState:
-        conversation_id = conversation_id or str(uuid.uuid4())
-        
-        state = JurixState(
-            query=f"Generate comprehensive article for ticket {ticket_id}",
-            intent={"intent": "article_generation", "project": project_id},
-            conversation_id=conversation_id,
-            conversation_history=[],
-            articles=[],
-            recommendations=[],
-            status="pending",
-            response="",
-            articles_used=[],
-            workflow_status="",
-            next_agent="",
-            project=project_id,
-            ticket_id=ticket_id,
-            article={},
-            redundant=False,
-            refinement_suggestion=None,
-            approved=False,
-            refinement_count=0,
-            has_refined=False,
-            iteration_count=0,
-            workflow_stage="started",
-            recommendation_id=None,
-            workflow_history=[],
-            autonomous_refinement_done=False,
-            collaboration_metadata=None,
-            final_collaboration_summary=None,
-            collaboration_insights=None,
-            collaboration_trace=None,
-            collaborative_agents_used=None,
-            predictions=None,
-            predictive_insights=None
-        )
-        
-        logger.info(f"Starting jira workflow for ticket {ticket_id}")
-        
-        recommendation_id, recommendations = self._run_jira_recommendation_agent(state)
-        state["recommendation_id"] = recommendation_id
-        state["recommendations"] = recommendations
-        
-        workflow = self._build_jira_workflow()
-        final_state = state
-        collaboration_trace = []
-        
-        for event in workflow.stream(state):
-            for node_name, node_state in event.items():
-                collab_metadata = node_state.get("collaboration_metadata", {})
-                if collab_metadata:
-                    collaboration_trace.append({
-                        "node": node_name,
-                        "collaboration": collab_metadata,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                
-                final_state = node_state
-                
-                if (node_name == "jira_article_generator" and 
-                    final_state.get("article") and 
-                    "provide more project-specific details" in str(final_state.get("recommendations", []))):
-                    final_state_dict = dict(final_state)
-                    final_state_dict["article"] = final_state.get("article", {})
-                    recommendation_id, recommendations = self._run_jira_recommendation_agent(final_state_dict)
-                    final_state["recommendation_id"] = recommendation_id
-                    final_state["recommendations"] = recommendations
-        
-        final_state["collaboration_trace"] = collaboration_trace
-        
-        return final_state
-    
-    def _build_jira_workflow(self):
-        """FIXED: Simple workflow that runs once and stops"""
-        workflow = StateGraph(JurixState)
-        
-        # Only two nodes - generate and validate
-        workflow.add_node("jira_article_generator", self._jira_article_generator_node)
-        workflow.add_node("knowledge_base", self._knowledge_base_node)
-
-        # Start with article generation
-        workflow.set_entry_point("jira_article_generator")
-
-        def route(state: JurixState) -> str:
-            """Simple routing - generate once, validate once, then END"""
-            logger.info(f"[ROUTING] Current state: {state.get('workflow_stage')}")
-            
-            # If article generation failed, end immediately
-            if state.get("workflow_status") == "failure":
-                logger.info("[ROUTING] Article generation failed - ending workflow")
-                return END
-            
-            # If we just generated the article, validate it once
-            if state.get("workflow_stage") == "article_generated":
-                logger.info("[ROUTING] Article generated - going to validation")
-                return "knowledge_base"
-            
-            # After validation, always end
-            logger.info("[ROUTING] Validation complete - ending workflow")
-            return END
-
-        # Simple linear flow
-        workflow.add_conditional_edges("jira_article_generator", route)
-        
-        # Knowledge base always goes to END
-        workflow.add_edge("knowledge_base", END)
-
-        return workflow.compile()
-    
     def _run_jira_recommendation_agent(self, state: Dict[str, Any]) -> tuple:
         logger.info(f"Running recommendation agent for ticket {state['ticket_id']}")
         
@@ -1226,7 +1340,6 @@ class Orchestrator:
         return recommendation_id
     
     def _jira_article_generator_node(self, state: JurixState) -> JurixState:
-        """FIXED: Generate article once and mark completion"""
         input_data = {
             "ticket_id": state["ticket_id"],
             "refinement_suggestion": state.get("refinement_suggestion"),
@@ -1238,23 +1351,21 @@ class Orchestrator:
         updated_state = state.copy()
         updated_state["article"] = result.get("article", {})
         updated_state["workflow_status"] = result.get("workflow_status", "failure")
-        updated_state["workflow_stage"] = "article_generated"  # Mark as generated
-        updated_state["workflow_completed"] = True  # Prevent re-execution
+        updated_state["workflow_stage"] = "article_generated"
+        updated_state["workflow_completed"] = True
         
-        # Store the article immediately
         if result.get("article"):
             article_key = f"article_draft:{state['ticket_id']}"
             self.shared_memory.redis_client.set(
                 article_key, 
                 json.dumps(result["article"])
             )
-            self.shared_memory.redis_client.expire(article_key, 86400)  # 24 hours
+            self.shared_memory.redis_client.expire(article_key, 86400)
             logger.info(f"✅ Article stored in Redis: {article_key}")
         
         return updated_state
     
     def _knowledge_base_node(self, state: JurixState) -> JurixState:
-        """FIXED: Validate once and provide feedback, no loops"""
         input_data = {
             "article": state["article"],
             "validation_context": "final_validation"
@@ -1265,105 +1376,14 @@ class Orchestrator:
         updated_state = state.copy()
         updated_state["redundant"] = result.get("redundant", False)
         updated_state["refinement_suggestion"] = result.get("refinement_suggestion")
-        updated_state["workflow_status"] = "completed"  # Mark as completed
+        updated_state["workflow_status"] = "completed"
         updated_state["workflow_stage"] = "validation_complete"
-        
-        # Important: Don't trigger any refinement loops
         updated_state["needs_refinement"] = False
         updated_state["workflow_completed"] = True
         
         logger.info("✅ Validation complete - workflow ending")
         
         return updated_state
-    
-    def run_predictive_workflow(self, project_id: str, analysis_type: str = "comprehensive", 
-                              conversation_id: str = None) -> JurixState:
-        conversation_id = conversation_id or str(uuid.uuid4())
-        
-        state = JurixState(
-            query=f"Generate predictive analysis for {project_id}",
-            intent={"intent": "predictive_analysis", "project": project_id},
-            conversation_id=conversation_id,
-            conversation_history=[],
-            articles=[],
-            recommendations=[],
-            status="pending",
-            response="",
-            articles_used=[],
-            workflow_status="",
-            next_agent="",
-            project=project_id,
-            project_id=project_id,
-            time_range={
-                "start": "2025-05-01T00:00:00Z",
-                "end": "2025-05-17T23:59:59Z"
-            },
-            tickets=[],
-            metrics={},
-            visualization_data={},
-            report="",
-            metadata={},
-            ticket_id="",
-            article={},
-            redundant=False,
-            refinement_suggestion=None,
-            approved=False,
-            refinement_count=0,
-            has_refined=False,
-            iteration_count=0,
-            workflow_stage="",
-            recommendation_id=None,
-            workflow_history=[],
-            error=None,
-            recommendation_status=None,
-            dashboard_id=None,
-            collaboration_metadata=None,
-            final_collaboration_summary=None,
-            collaboration_insights=None,
-            collaboration_trace=None,
-            collaborative_agents_used=None,
-            predictions=None,
-            predictive_insights=None,
-            analysis_type=analysis_type
-        )
-        
-        logger.info(f"Starting predictive workflow for {project_id}")
-        
-        workflow = self._build_predictive_workflow()
-        final_state = state
-        
-        collaboration_trace = []
-        
-        for event in workflow.stream(state):
-            for node_name, node_state in event.items():
-                collab_metadata = node_state.get("collaboration_metadata", {})
-                if collab_metadata:
-                    collaboration_trace.append({
-                        "node": node_name,
-                        "collaboration": collab_metadata,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                
-                final_state = node_state
-        
-        final_state["collaboration_trace"] = collaboration_trace
-        
-        return final_state
-    
-    def _build_predictive_workflow(self):
-        workflow = StateGraph(JurixState)
-        
-        workflow.add_node("jira_data_agent", self._predictive_jira_data_node)
-        workflow.add_node("predictive_analysis_agent", self._predictive_analysis_node)
-        workflow.add_node("recommendation_agent", self._predictive_recommendation_node)
-        
-        workflow.set_entry_point("jira_data_agent")
-        
-        workflow.add_edge("jira_data_agent", "predictive_analysis_agent")
-        workflow.add_edge("predictive_analysis_agent", "recommendation_agent")
-        workflow.add_edge("recommendation_agent", END)
-        
-        return workflow.compile()
     
     def _predictive_jira_data_node(self, state: JurixState) -> JurixState:
         input_data = {
@@ -1495,8 +1515,10 @@ class Orchestrator:
         
         return updated_state
 
+# Create the global orchestrator instance
 orchestrator = Orchestrator()
 
+# Wrapper functions for backward compatibility
 def run_workflow(query: str, conversation_id: str = None) -> JurixState:
     return orchestrator.run_workflow(query, conversation_id)
 
