@@ -25,7 +25,6 @@ class WorkflowStatus(Enum):
 
 class PersistentWorkflowState(TypedDict):
     """Enhanced state that persists across workflow executions"""
-    # Original JurixState fields
     query: str
     intent: Dict[str, Any]
     conversation_id: str
@@ -39,8 +38,6 @@ class PersistentWorkflowState(TypedDict):
     workflow_status: str
     next_agent: str
     project: Optional[str]
-    
-    # Enhanced persistence fields
     workflow_id: str
     workflow_type: str
     workflow_version: str
@@ -67,8 +64,7 @@ class LangGraphRedisManager:
         self.state_ttl = 86400 * 7  # 7 days
         self.checkpoint_interval = 30  # seconds
         self.max_retries = 3
-        
-        # Initialize Redis structures
+
         self._initialize_redis_structures()
         
         self.logger.info("LangGraphRedisManager initialized")
@@ -76,10 +72,7 @@ class LangGraphRedisManager:
     def _initialize_redis_structures(self):
         """Initialize Redis data structures for workflow management"""
         try:
-            # Create workflow indices
             self.redis_client.setnx("workflow_counter", 0)
-            
-            # Initialize performance tracking
             performance_key = "workflow_performance:global"
             if not self.redis_client.exists(performance_key):
                 initial_perf = {
@@ -98,16 +91,11 @@ class LangGraphRedisManager:
     def create_workflow_state(self, workflow_type: WorkflowType, initial_state: Dict[str, Any]) -> PersistentWorkflowState:
         """Create a new persistent workflow state"""
         try:
-            # Generate unique workflow ID
             workflow_counter = self.redis_client.incr("workflow_counter")
             workflow_id = f"workflow_{workflow_type.value}_{workflow_counter}_{str(uuid.uuid4())[:8]}"
-            
-            # Create enhanced state
+
             persistent_state = PersistentWorkflowState(
-                # Copy original state
                 **initial_state,
-                
-                # Add persistence fields
                 workflow_id=workflow_id,
                 workflow_type=workflow_type.value,
                 workflow_version="1.0",
@@ -129,11 +117,7 @@ class LangGraphRedisManager:
                 parent_workflow_id=None,
                 child_workflow_ids=[]
             )
-            
-            # Store in Redis
             self._save_workflow_state(persistent_state)
-            
-            # Add to active workflows index
             self.redis_client.sadd("active_workflows", workflow_id)
             self.redis_client.sadd(f"workflows_by_type:{workflow_type.value}", workflow_id)
             
@@ -165,14 +149,8 @@ class LangGraphRedisManager:
         try:
             workflow_id = state["workflow_id"]
             state_key = f"workflow_state:{workflow_id}"
-            
-            # Update timestamp
             state["last_updated"] = datetime.now().isoformat()
-            
-            # Store state
             self.redis_client.set(state_key, json.dumps(state, default=str), ex=self.state_ttl)
-            
-            # Update metadata
             metadata_key = f"workflow_metadata:{workflow_id}"
             metadata = {
                 "workflow_type": state["workflow_type"],
@@ -190,11 +168,8 @@ class LangGraphRedisManager:
                           node_result: Dict[str, Any] = None):
         """Create a checkpoint for the workflow"""
         try:
-            # Update current node
             state["current_node"] = current_node
             state["execution_count"] += 1
-            
-            # Add to node history
             checkpoint_entry = {
                 "node": current_node,
                 "timestamp": datetime.now().isoformat(),
@@ -202,15 +177,9 @@ class LangGraphRedisManager:
                 "execution_count": state["execution_count"]
             }
             state["node_history"].append(checkpoint_entry)
-            
-            # Limit history size
             if len(state["node_history"]) > 100:
                 state["node_history"] = state["node_history"][-100:]
-            
-            # Save updated state
             self._save_workflow_state(state)
-            
-            # Store in semantic memory if available
             self._store_checkpoint_semantically(state, current_node, node_result)
             
             self.logger.info(f"Checkpointed workflow {state['workflow_id']} at node {current_node}")
@@ -225,8 +194,6 @@ class LangGraphRedisManager:
             from orchestrator.memory.vector_memory_manager import VectorMemoryManager, MemoryType # type: ignore
             
             vm = VectorMemoryManager(self.redis_client)
-            
-            # Create semantic description of the checkpoint
             content = f"Workflow {state['workflow_type']} reached node {current_node}. "
             if node_result:
                 if node_result.get("workflow_status") == "success":
@@ -262,28 +229,19 @@ class LangGraphRedisManager:
             state = self.load_workflow_state(workflow_id)
             if not state:
                 return None
-            
-            # Update status
             state["workflow_status"] = WorkflowStatus.RESUMED.value
             state["retry_count"] += 1
-            
-            # Check retry limit
             if state["retry_count"] > self.max_retries:
                 state["workflow_status"] = WorkflowStatus.FAILED.value
                 self.logger.warning(f"Workflow {workflow_id} exceeded retry limit")
                 return state
-            
-            # Add resume entry to history
             resume_entry = {
                 "action": "resume",
                 "timestamp": datetime.now().isoformat(),
                 "retry_count": state["retry_count"]
             }
             state["node_history"].append(resume_entry)
-            
-            # Save updated state
             self._save_workflow_state(state)
-            
             self.logger.info(f"Resumed workflow {workflow_id} from node {state['current_node']}")
             return state
             
@@ -294,11 +252,8 @@ class LangGraphRedisManager:
     def complete_workflow(self, state: PersistentWorkflowState, final_result: Dict[str, Any]):
         """Mark workflow as completed and store results"""
         try:
-            # Update state
             state["workflow_status"] = WorkflowStatus.COMPLETED.value
             state["current_node"] = "END"
-            
-            # Calculate performance metrics
             start_time = datetime.fromisoformat(state["performance_metrics"]["start_time"])
             end_time = datetime.now()
             execution_time = (end_time - start_time).total_seconds()
@@ -306,8 +261,7 @@ class LangGraphRedisManager:
             state["performance_metrics"]["end_time"] = end_time.isoformat()
             state["performance_metrics"]["total_execution_time"] = execution_time
             state["performance_metrics"]["nodes_executed"] = len(state["node_history"])
-            
-            # Add completion entry
+
             completion_entry = {
                 "action": "complete",
                 "timestamp": end_time.isoformat(),
@@ -315,17 +269,9 @@ class LangGraphRedisManager:
                 "execution_time": execution_time
             }
             state["node_history"].append(completion_entry)
-            
-            # Save final state
             self._save_workflow_state(state)
-            
-            # Remove from active workflows
             self.redis_client.srem("active_workflows", state["workflow_id"])
-            
-            # Update global performance metrics
             self._update_global_performance(state)
-            
-            # Store completion in semantic memory
             self._store_completion_semantically(state, final_result)
             
             self.logger.info(f"Completed workflow {state['workflow_id']} in {execution_time:.2f}s")
@@ -348,25 +294,18 @@ class LangGraphRedisManager:
                     "failed_workflows": 0,
                     "avg_execution_time": 0.0
                 }
-            
-            # Update counters
             perf_data["total_workflows"] += 1
             
             if state["workflow_status"] == WorkflowStatus.COMPLETED.value:
                 perf_data["successful_workflows"] += 1
             else:
                 perf_data["failed_workflows"] += 1
-            
-            # Update average execution time
             execution_time = state["performance_metrics"].get("total_execution_time", 0)
             current_avg = perf_data["avg_execution_time"]
             total_workflows = perf_data["total_workflows"]
-            
             new_avg = ((current_avg * (total_workflows - 1)) + execution_time) / total_workflows
             perf_data["avg_execution_time"] = new_avg
             perf_data["last_updated"] = datetime.now().isoformat()
-            
-            # Store updated performance
             self.redis_client.set(performance_key, json.dumps(perf_data))
             
         except Exception as e:
@@ -378,8 +317,6 @@ class LangGraphRedisManager:
             from orchestrator.memory.vector_memory_manager import VectorMemoryManager, MemoryType # type: ignore
             
             vm = VectorMemoryManager(self.redis_client)
-            
-            # Create semantic description of the completion
             execution_time = state["performance_metrics"].get("total_execution_time", 0)
             success = state["workflow_status"] == WorkflowStatus.COMPLETED.value
             
@@ -416,17 +353,10 @@ class LangGraphRedisManager:
         """Get insights about workflow performance and patterns"""
         try:
             insights = {}
-            
-            # Global performance
             global_perf = self.redis_client.get("workflow_performance:global")
             if global_perf:
                 insights["global_performance"] = json.loads(global_perf)
-            
-            # Active workflows
             active_workflows = list(self.redis_client.smembers("active_workflows"))
-            insights["active_workflows_count"] = len(active_workflows)
-            
-            # Workflows by type
             if workflow_type:
                 type_workflows = list(self.redis_client.smembers(f"workflows_by_type:{workflow_type.value}"))
                 insights[f"{workflow_type.value}_workflows"] = len(type_workflows)
@@ -434,8 +364,6 @@ class LangGraphRedisManager:
                 for wf_type in WorkflowType:
                     type_workflows = list(self.redis_client.smembers(f"workflows_by_type:{wf_type.value}"))
                     insights[f"{wf_type.value}_workflows"] = len(type_workflows)
-            
-            # Recent workflow patterns (from semantic memory)
             try:
                 from orchestrator.memory.vector_memory_manager import VectorMemoryManager # type: ignore
                 vm = VectorMemoryManager(self.redis_client)
@@ -445,7 +373,6 @@ class LangGraphRedisManager:
                     agent_id="workflow_system",
                     max_results=20
                 )
-                
                 insights["recent_patterns"] = {
                     "total_recent": len(recent_workflows),
                     "success_rate": sum(1 for m in recent_workflows 
@@ -466,8 +393,6 @@ class LangGraphRedisManager:
         """Clean up old completed workflows"""
         try:
             cutoff_time = datetime.now() - timedelta(days=max_age_days)
-            
-            # Get all workflow metadata keys
             metadata_keys = self.redis_client.keys("workflow_metadata:*")
             cleaned_count = 0
             
@@ -478,21 +403,13 @@ class LangGraphRedisManager:
                     last_updated = datetime.fromisoformat(metadata_data["last_updated"])
                     
                     if last_updated < cutoff_time and metadata_data["status"] in ["completed", "failed"]:
-                        # Extract workflow ID
                         workflow_id = metadata_key.split(":")[-1]
-                        
-                        # Delete workflow state and metadata
                         self.redis_client.delete(f"workflow_state:{workflow_id}")
                         self.redis_client.delete(metadata_key)
-                        
-                        # Remove from indices
                         self.redis_client.srem("active_workflows", workflow_id)
-                        
-                        cleaned_count += 1
-            
+                        cleaned_count += 1 
             self.logger.info(f"Cleaned up {cleaned_count} old workflows")
             return cleaned_count
-            
         except Exception as e:
             self.logger.error(f"Failed to cleanup old workflows: {e}")
             return 0

@@ -18,8 +18,6 @@ class TestForecastAPI:
     def mock_tickets(self):
         """Generate realistic ticket data for testing"""
         tickets = []
-        
-        # Create completed tickets with resolution dates
         for i in range(15):
             resolution_date = (datetime.now() - timedelta(days=i)).isoformat() + "Z"
             tickets.append({
@@ -33,7 +31,6 @@ class TestForecastAPI:
                 }
             })
         
-        # Add in-progress tickets
         for i in range(15, 25):
             tickets.append({
                 "key": f"TEST-{i}",
@@ -44,8 +41,6 @@ class TestForecastAPI:
                     "created": (datetime.now() - timedelta(days=i-10)).isoformat() + "Z"
                 }
             })
-        
-        # Add todo tickets
         for i in range(25, 35):
             tickets.append({
                 "key": f"TEST-{i}",
@@ -61,15 +56,13 @@ class TestForecastAPI:
     
     def test_velocity_forecast(self, client, mock_tickets, monkeypatch):
         """Test velocity forecast generation"""
-        # Mock the Jira data agent to return our test tickets
         def mock_run_predictive_workflow(project_key, analysis_type, conversation_id=None):
-            # Simulate the predictive workflow
             from orchestrator.graph.state import JurixState # type: ignore
             
             state = JurixState()
             state["tickets"] = mock_tickets
             state["metrics"] = {
-                "throughput": 15,  # 15 completed tickets
+                "throughput": 15,  
                 "cycle_time": 3.5,
                 "workload": {
                     "Developer 0": 12,
@@ -78,7 +71,6 @@ class TestForecastAPI:
                 }
             }
             
-            # Mock the predictive agent to avoid the missing method issue
             class MockPredictiveAgent:
                 def run(self, input_data):
                     # Generate realistic predictions

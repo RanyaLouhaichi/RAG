@@ -14,19 +14,17 @@ class ProductivityDashboardAgent(BaseAgent):
     def __init__(self, redis_client=None):
         super().__init__(name="productivity_dashboard_agent", redis_client=redis_client)
         self.model_manager = ModelManager()
-        self.db_path = "shared_data.db"  
-        self.last_throughput = 0  
-        
+        self.db_path = "shared_data.db"
+        self.last_throughput = 0
         self.mental_state.capabilities = [
             AgentCapability.RETRIEVE_DATA,
             AgentCapability.RANK_CONTENT,
             AgentCapability.COORDINATE_AGENTS,
             AgentCapability.PROVIDE_RECOMMENDATIONS
         ]
-        
         self.mental_state.obligations.extend([
             "analyze_ticket_data",
-            "generate_metrics", 
+            "generate_metrics",
             "create_visualization_data",
             "generate_report",
             "check_for_updates",
@@ -36,9 +34,7 @@ class ProductivityDashboardAgent(BaseAgent):
             "collaborate_for_recommendations",
             "integrate_predictions"
         ])
-        
         self.log("Enhanced ProductivityDashboardAgent initialized with collaborative analytics capabilities")
-        
         self.monitoring_thread = threading.Thread(target=self._check_for_updates_loop, daemon=True)
         self.monitoring_thread.start()
 

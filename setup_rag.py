@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Setup script for enhanced RAG system"""
-
 import os
 import sys
 import subprocess
@@ -29,8 +26,6 @@ def start_neo4j():
        subprocess.run(['docker-compose', '-f', 'docker-compose-neo4j.yml', 'up', '-d'], check=True)
        logger.info("⏳ Waiting for Neo4j to start (30 seconds)...")
        time.sleep(30)
-       
-       # Test Neo4j connection
        from neo4j import GraphDatabase
        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
        auth = (os.getenv("NEO4J_USERNAME", "neo4j"), os.getenv("NEO4J_PASSWORD", "jurix_neo4j_password"))
@@ -63,7 +58,7 @@ def test_imports():
    logger.info("Testing imports...")
    try:
        import neo4j
-       import docling
+       import docling # type: ignore
        from sentence_transformers import SentenceTransformer
        import chromadb
        import tiktoken
@@ -80,7 +75,6 @@ def initialize_rag_system():
    try:
        from orchestrator.rag.enhanced_rag_pipeline import EnhancedRAGPipeline # type: ignore
        
-       # Initialize pipeline
        pipeline = EnhancedRAGPipeline(
            neo4j_uri=os.getenv("NEO4J_URI"),
            neo4j_user=os.getenv("NEO4J_USERNAME"),
@@ -100,28 +94,22 @@ def initialize_rag_system():
 def main():
    """Main setup function"""
    logger.info("🚀 Starting RAG Enhancement Setup")
-   
-   # Load environment variables
+
    load_dotenv()
-   
-   # Check prerequisites
+
    if not check_docker():
        logger.error("Please install and start Docker first")
        return False
-   
-   # Install dependencies
+
    if not install_dependencies():
        return False
-   
-   # Test imports
+
    if not test_imports():
        return False
-   
-   # Start Neo4j
+
    if not start_neo4j():
        return False
-   
-   # Initialize RAG system
+ 
    pipeline = initialize_rag_system()
    if not pipeline:
        return False

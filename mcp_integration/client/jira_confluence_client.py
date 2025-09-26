@@ -1,4 +1,3 @@
-# mcp_integration/client/jira_confluence_client.py
 import asyncio
 import json
 import logging
@@ -24,7 +23,6 @@ class JiraConfluenceMCPClient:
     async def connect_to_jira_server(self):
         """Connect to Jira MCP server"""
         try:
-            # Create server parameters with full Python path
             server_params = StdioServerParameters(
                 command=sys.executable,  # Use the current Python interpreter
                 args=["-m", "mcp_integration.servers.jira_mcp_server"],
@@ -33,33 +31,24 @@ class JiraConfluenceMCPClient:
             
             self.logger.info(f"Starting Jira MCP server with command: {server_params.command} {' '.join(server_params.args)}")
             
-            # Create client using context manager
             self._jira_context = stdio_client(server_params)
             read_stream, write_stream = await self._jira_context.__aenter__()
             
-            # Create session
             self.jira_session = ClientSession(read_stream, write_stream)
             await self.jira_session.__aenter__()
             
-            # Initialize the session
             result = await self.jira_session.initialize()
             
             self.logger.info(f"Connected to Jira MCP Server: {result}")
             
-            # Test the connection - FIX: Handle the response properly
             tools_response = await self.jira_session.list_tools()
             
-            # The response might be a list of tuples or objects
-            # Let's handle both cases
             tools = []
             if hasattr(tools_response, 'tools'):
-                # It's a proper response object
                 tools = tools_response.tools
             elif isinstance(tools_response, list):
-                # It's a list (could be tuples or objects)
                 tools = tools_response
             
-            # Extract tool names safely
             tool_names = []
             for tool in tools:
                 if hasattr(tool, 'name'):
@@ -67,7 +56,6 @@ class JiraConfluenceMCPClient:
                 elif isinstance(tool, dict):
                     tool_names.append(tool.get('name', 'unknown'))
                 elif isinstance(tool, tuple) and len(tool) > 0:
-                    # If it's a tuple, the first element might be the name
                     tool_names.append(str(tool[0]))
                 else:
                     tool_names.append('unknown')
@@ -83,7 +71,6 @@ class JiraConfluenceMCPClient:
     async def disconnect(self):
         """Disconnect from MCP servers"""
         try:
-            # Close sessions
             if self.jira_session:
                 await self.jira_session.__aexit__(None, None, None)
                 self.jira_session = None
@@ -92,7 +79,6 @@ class JiraConfluenceMCPClient:
                 await self.confluence_session.__aexit__(None, None, None)
                 self.confluence_session = None
             
-            # Close context managers
             if self._jira_context:
                 await self._jira_context.__aexit__(None, None, None)
                 self._jira_context = None
@@ -104,7 +90,6 @@ class JiraConfluenceMCPClient:
         except Exception as e:
             self.logger.error(f"Error during disconnect: {e}")
     
-    # Jira Methods
     async def get_available_projects(self) -> List[str]:
         """Get available Jira projects"""
         if not self.jira_session:
@@ -113,18 +98,13 @@ class JiraConfluenceMCPClient:
         try:
             result = await self.jira_session.call_tool("get_projects", {})
             
-            # Handle different response formats
             if hasattr(result, 'content') and result.content:
-                # Standard MCP response
                 projects_data = json.loads(result.content[0].text)
             elif isinstance(result, dict):
-                # Direct dict response
                 projects_data = result
             elif isinstance(result, str):
-                # JSON string response
                 projects_data = json.loads(result)
             else:
-                # Try to convert to string and parse
                 projects_data = json.loads(str(result))
             
             projects = projects_data.get("projects", [])
@@ -148,7 +128,6 @@ class JiraConfluenceMCPClient:
             
             result = await self.jira_session.call_tool("get_project_tickets", args)
             
-            # Handle different response formats
             if hasattr(result, 'content') and result.content:
                 data = json.loads(result.content[0].text)
             elif isinstance(result, dict):
@@ -175,7 +154,6 @@ class JiraConfluenceMCPClient:
                 "max_results": max_results
             })
             
-            # Handle different response formats
             if hasattr(result, 'content') and result.content:
                 data = json.loads(result.content[0].text)
             elif isinstance(result, dict):
@@ -202,7 +180,6 @@ class JiraConfluenceMCPClient:
                 "period_days": period_days
             })
             
-            # Handle different response formats
             if hasattr(result, 'content') and result.content:
                 data = json.loads(result.content[0].text)
             elif isinstance(result, dict):
@@ -218,8 +195,6 @@ class JiraConfluenceMCPClient:
             self.logger.error(f"Failed to analyze project metrics: {e}")
             return {}
     
-    
-    # Confluence Methods
     async def connect_to_confluence_server(self):
         """Connect to Confluence MCP server"""
         try:
@@ -229,11 +204,9 @@ class JiraConfluenceMCPClient:
                 env=None
             )
             
-            # Create client using context manager
             self._confluence_context = stdio_client(server_params)
             read_stream, write_stream = await self._confluence_context.__aenter__()
             
-            # Create session
             self.confluence_session = ClientSession(read_stream, write_stream)
             await self.confluence_session.__aenter__()
             
@@ -286,7 +259,6 @@ class JiraConfluenceMCPClient:
         result = await self.confluence_session.call_tool("get_article_templates", args)
         return json.loads(result.content[0].text)
     
-    # Resource access methods
     async def get_jira_jql_templates(self) -> Dict[str, str]:
         """Get JQL query templates"""
         if not self.jira_session:

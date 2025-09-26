@@ -10,8 +10,7 @@ class JurixSharedMemory:
         self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
         self.storage: Dict[str, Dict[str, Any]] = {}
         self.logger = logging.getLogger("JurixSharedMemory")
-        
-        # Test connection
+
         try:
             self.redis_client.ping()
             self.logger.info("✅ Connected to Redis successfully!")
@@ -48,19 +47,16 @@ class JurixSharedMemory:
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
-        
-        # Keep only last 50 interactions to prevent memory bloat
         if len(conversation) > 50:
             conversation = conversation[-50:]
             
         self.redis_client.set(key, json.dumps(conversation))
-        # Set expiration (24 hours)
         self.redis_client.expire(key, 86400)
     
     def store(self, key: str, value: Dict[str, Any]) -> None:
         """Store a value under the given key in Redis"""
         try:
-            serialized_value = json.dumps(value, default=str)  # Handle datetime objects
+            serialized_value = json.dumps(value, default=str) 
             self.redis_client.set(f"storage:{key}", serialized_value)
             self.logger.info(f"Stored data with key: storage:{key}")
         except Exception as e:
@@ -82,7 +78,6 @@ class JurixSharedMemory:
         try:
             serialized_tickets = json.dumps(tickets, default=str)
             self.redis_client.set(key, serialized_tickets)
-            # Store metadata
             metadata_key = f"tickets_meta:{project_id}"
             metadata = {
                 "last_updated": datetime.now().isoformat(),
@@ -136,7 +131,6 @@ class JurixSharedMemory:
         try:
             serialized_state = json.dumps(state, default=str)
             self.redis_client.set(key, serialized_state)
-            # Set expiration (1 hour for agent states)
             self.redis_client.expire(key, 3600)
         except Exception as e:
             self.logger.error(f"Failed to store agent state for {agent_id}: {e}")
@@ -174,12 +168,11 @@ class JurixSharedMemory:
     def clear_expired_data(self) -> None:
         """Clean up expired data (can be called periodically)"""
         try:
-            # Get all conversation keys older than 24 hours
             conversation_keys = self.redis_client.keys("conversation:*")
             for key in conversation_keys:
                 ttl = self.redis_client.ttl(key)
-                if ttl == -1:  # No expiration set
-                    self.redis_client.expire(key, 86400)  # Set 24 hour expiration
+                if ttl == -1:  
+                    self.redis_client.expire(key, 86400) 
             
             self.logger.info("Cleaned up expired data")
         except Exception as e:
@@ -199,8 +192,6 @@ class JurixSharedMemory:
         except Exception as e:
             self.logger.error(f"Failed to get memory stats: {e}")
             return {}
-
-    # Backward compatibility property for legacy code
     @property
     def memory(self):
         """Backward compatibility: provide dict-like access to Redis"""

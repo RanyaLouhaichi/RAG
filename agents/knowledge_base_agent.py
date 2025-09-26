@@ -13,11 +13,9 @@ class KnowledgeBaseAgent(BaseAgent):
         super().__init__(name="knowledge_base_agent")
         self.shared_memory = shared_memory
         self.model_manager = ModelManager()
-        
         self.mental_state.capabilities = [
             AgentCapability.EVALUATE_ARTICLE
         ]
-        
         self.mental_state.obligations.extend([
             "detect_query_type",
             "evaluate_article"
@@ -35,7 +33,6 @@ class KnowledgeBaseAgent(BaseAgent):
     def _perceive(self, input_data: Dict[str, Any]) -> None:
         super()._perceive(input_data)
         article = input_data.get("article", {})
-        
         self.log(f"[DEBUG] Perceiving article evaluation request for article: {article.get('title')}")
         self.mental_state.beliefs.update({
             "article": article,
@@ -45,7 +42,6 @@ class KnowledgeBaseAgent(BaseAgent):
     def _evaluate_article(self) -> Dict[str, Any]:
         article = self.mental_state.beliefs["article"]
         content = article.get("content", "")
-        
         prompt_template = f"""You are evaluating a technical documentation article.
 
             Review the article and provide your evaluation as a JSON object.
@@ -64,12 +60,8 @@ class KnowledgeBaseAgent(BaseAgent):
             }}
 
             Provide a specific, actionable refinement suggestion even if the article is good."""
-        
         self.log(f"[DEBUG] Article evaluation prompt: {prompt_template[:500]}...")
-        
         try:
-            
-            # Use dynamic model selection
             response = self.model_manager.generate_response(
                 prompt=prompt_template,
                 context={
@@ -81,23 +73,18 @@ class KnowledgeBaseAgent(BaseAgent):
             )
             self.log(f"✅ {self.name} received response from model")
             self.log(f"[DEBUG] Raw LLM evaluation response: {response}")
-            
             import json
             evaluation = json.loads(response)
-            
             if not isinstance(evaluation, dict):
                 raise ValueError("Evaluation response is not a dictionary")
             if "redundant" not in evaluation:
                 evaluation["redundant"] = False
             if "refinement_suggestion" not in evaluation or not evaluation["refinement_suggestion"]:
                 evaluation["refinement_suggestion"] = "Add more specific metrics and implementation details to make the article more technically valuable."
-            
             self.log(f"[DEBUG] Evaluation result: {evaluation}")
             return evaluation
-            
         except Exception as e:
             self.log(f"[ERROR] Failed to evaluate article with LLM: {e}")
-          
             return {
                 "redundant": False,
                 "refinement_suggestion": "Add specific performance metrics and technical implementation details to make the content more precise and actionable."

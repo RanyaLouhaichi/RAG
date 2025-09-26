@@ -27,28 +27,20 @@ class EnhancedRAGPipeline:
                  chroma_persist_dir: str = "./chroma_data_enhanced"):
         
         self.logger = logging.getLogger("EnhancedRAGPipeline")
-        
-        # Initialize components
+  
         self.neo4j_manager = Neo4jManager(neo4j_uri, neo4j_user, neo4j_password)
         self.confluence_extractor = ConfluenceDoclingExtractor(
             confluence_url, confluence_user, confluence_password
         )
         self.semantic_chunker = SemanticChunkerWithLLMJudge()
-        
-        # Initialize embedding models
+
         self.chunk_embedder = SentenceTransformer('all-MiniLM-L6-v2')
-        self.doc_embedder = SentenceTransformer('all-mpnet-base-v2')  # Different model for doc-level
-        
-        # Initialize ChromaDB with multiple collections
+        self.doc_embedder = SentenceTransformer('all-mpnet-base-v2') 
         self.chroma_client = chromadb.PersistentClient(path=chroma_persist_dir)
-        
-        # Collection for chunk-level embeddings
         self.chunk_collection = self.chroma_client.get_or_create_collection(
             name="confluence_chunks_enhanced",
             metadata={"description": "Semantic chunks with quality scores"}
         )
-        
-        # Collection for document-level embeddings
         self.doc_collection = self.chroma_client.get_or_create_collection(
             name="confluence_docs_enhanced",
             metadata={"description": "Document-level embeddings"}
@@ -59,8 +51,7 @@ class EnhancedRAGPipeline:
     def ingest_confluence_space(self, space_key: str, limit: int = 100):
         """Ingest all documents from a Confluence space"""
         self.logger.info(f"Starting ingestion of space: {space_key}")
-        
-        # Extract documents
+
         documents = self.confluence_extractor.extract_space_documents(space_key, limit)
         
         for doc in documents:
@@ -71,8 +62,7 @@ class EnhancedRAGPipeline:
                 continue
         
         self.logger.info(f"Ingestion complete. Processed {len(documents)} documents")
-    
-    # In orchestrator/rag/enhanced_rag_pipeline.py, update the ingest_document method:
+  
 
     def ingest_document(self, document: Dict[str, Any]):
         """Ingest a single document with all enhancements"""
@@ -91,8 +81,6 @@ class EnhancedRAGPipeline:
         doc_embedding = self.doc_embedder.encode(
             f"{document['title']} {document['content'][:1000]}"
         )
-        
-        # Store document-level embedding - flatten metadata for ChromaDB
         doc_metadata = {
             'doc_id': doc_id,
             'title': document['title'],
@@ -100,8 +88,6 @@ class EnhancedRAGPipeline:
             'type': 'document',
             'created_date': document.get('created_date', datetime.now().isoformat())
         }
-        
-        # Add flattened metadata fields
         if document.get('metadata'):
             for key, value in document['metadata'].items():
                 if isinstance(value, (str, int, float, bool, type(None))):
@@ -121,10 +107,8 @@ class EnhancedRAGPipeline:
         for i, chunk in enumerate(chunks):
             chunk_id = f"{doc_id}_chunk_{i}"
             
-            # Create chunk embedding
             chunk_embedding = self.chunk_embedder.encode(chunk.content)
-            
-            # Flatten chunk metadata for ChromaDB
+
             chunk_metadata = {
                 'chunk_id': chunk_id,
                 'doc_id': doc_id,
@@ -134,39 +118,30 @@ class EnhancedRAGPipeline:
                 'section': chunk.metadata.get('section', 'main')
             }
             
-            # Add quality evaluation fields if present (flatten them)
+
             quality_eval = chunk.metadata.get('quality_evaluation', {})
             if isinstance(quality_eval, dict):
                 for key, value in quality_eval.items():
                     if key == 'issues' and isinstance(value, list):
-                        # Join issues into a single string
                         chunk_metadata['quality_issues'] = '; '.join(str(issue) for issue in value)
                     elif isinstance(value, (str, int, float, bool, type(None))):
                         chunk_metadata[f'quality_{key}'] = value
-            
-            # Add other simple metadata fields
             for key, value in chunk.metadata.items():
                 if key not in ['quality_evaluation'] and isinstance(value, (str, int, float, bool, type(None))):
                     chunk_metadata[key] = value
-            
-            # Store in ChromaDB
             self.chunk_collection.add(
                 embeddings=[chunk_embedding.tolist()],
                 documents=[chunk.content],
                 metadatas=[chunk_metadata],
                 ids=[chunk_id]
             )
-            
-            # Add chunk to Neo4j
             self.neo4j_manager.add_chunk(
                 chunk_id=chunk_id,
                 doc_id=doc_id,
-                content=chunk.content[:500],  # Store preview
+                content=chunk.content[:500],  
                 chunk_index=i,
                 embedding_id=chunk_id
             )
-        
-        # 5. Extract and link ticket references
         ticket_refs = self.confluence_extractor.find_ticket_references(document)
         for ticket_key in ticket_refs:
             self.neo4j_manager.link_document_to_ticket(
@@ -220,8 +195,6 @@ class EnhancedRAGPipeline:
             )
         
         return all_results[:k]
-    
-    # In enhanced_rag_pipeline.py, update the _combine_search_results method:
 
     def _combine_search_results(self,
                             doc_results: Dict[str, Any],
@@ -231,8 +204,6 @@ class EnhancedRAGPipeline:
         """Combine results from different sources with intelligent ranking"""
         
         combined = {}
-        
-        # Process document-level results
         if doc_results['ids']:
             for i, doc_id in enumerate(doc_results['ids'][0]):
                 if doc_id not in combined:
@@ -247,8 +218,7 @@ class EnhancedRAGPipeline:
                         },
                         'source_types': ['doc_embedding']
                     }
-        
-        # Process chunk-level results
+
         if chunk_results['ids']:
             for i, chunk_id in enumerate(chunk_results['ids'][0]):
                 doc_id = chunk_results['metadatas'][0][i]['doc_id']
@@ -266,7 +236,6 @@ class EnhancedRAGPipeline:
                         'source_types': []
                     }
                 
-                # Update chunk similarity (take max)
                 chunk_score = 1.0 - chunk_results['distances'][0][i]
                 quality_score = chunk_results['metadatas'][0][i].get('quality_score', 0.5)
                 adjusted_score = chunk_score * (0.7 + 0.3 * quality_score)  # Quality bonus
@@ -278,8 +247,7 @@ class EnhancedRAGPipeline:
                 
                 if 'chunk_embedding' not in combined[doc_id]['source_types']:
                     combined[doc_id]['source_types'].append('chunk_embedding')
-        
-        # Process graph results
+
         for result in graph_results:
             doc_id = result['id']
             
@@ -299,18 +267,14 @@ class EnhancedRAGPipeline:
             combined[doc_id]['scores']['graph_relevance'] = result['relevance']
             if 'knowledge_graph' not in combined[doc_id]['source_types']:
                 combined[doc_id]['source_types'].append('knowledge_graph')
-        
-        # Calculate final scores
+
         results = []
         for doc_id, data in combined.items():
-            # Weighted combination of scores
             final_score = (
                 data['scores']['doc_similarity'] * 0.3 +
                 data['scores']['chunk_similarity'] * 0.4 +
                 data['scores']['graph_relevance'] * 0.3
             )
-            
-            # Bonus for multiple sources
             source_bonus = len(data['source_types']) * 0.1
             final_score = min(final_score + source_bonus, 1.0)
             
@@ -322,8 +286,6 @@ class EnhancedRAGPipeline:
                 'score_breakdown': data['scores'],
                 'sources': data['source_types']
             })
-        
-        # Sort by final score
         results.sort(key=lambda x: x['relevance_score'], reverse=True)
         
         return results
@@ -335,8 +297,6 @@ class EnhancedRAGPipeline:
         
         for result in results:
             doc_id = result['id']
-            
-            # Update graph relationships based on feedback
             if feedback.get('ticket_key') and feedback.get('helpful_docs'):
                 if doc_id in feedback['helpful_docs']:
                     self.neo4j_manager.update_relationship_feedback(
@@ -344,8 +304,6 @@ class EnhancedRAGPipeline:
                         ticket_key=feedback['ticket_key'],
                         helpful=True
                     )
-                    
-                    # If very helpful, create RESOLVES relationship
                     if feedback.get('resolved_ticket'):
                         self.neo4j_manager.link_document_to_ticket(
                             doc_id=doc_id,
@@ -357,8 +315,6 @@ class EnhancedRAGPipeline:
     def get_recommendations_for_ticket(self, ticket_key: str, 
                                      ticket_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Get document recommendations specifically for a ticket"""
-        
-        # Build enhanced query from ticket data
         query_parts = [
             ticket_data.get('summary', ''),
             ticket_data.get('description', '')[:500],
@@ -367,8 +323,6 @@ class EnhancedRAGPipeline:
         ]
         
         enhanced_query = " ".join(filter(None, query_parts))
-        
-        # Search with ticket context
         results = self.hybrid_search(
             query=enhanced_query,
             ticket_context={
@@ -378,24 +332,18 @@ class EnhancedRAGPipeline:
                 'status': ticket_data.get('status')
             }
         )
-        
-        # Look for solution patterns
         if ticket_data.get('project_key'):
             patterns = self.neo4j_manager.find_solution_patterns(
                 project_key=ticket_data['project_key'],
                 issue_type=ticket_data.get('issue_type')
             )
-            
-            # Boost documents that solved similar tickets
             for pattern in patterns:
                 for doc in pattern['resolving_documents']:
                     for result in results:
                         if result['id'] == doc['id']:
-                            result['relevance_score'] *= 1.2  # Boost
+                            result['relevance_score'] *= 1.2 
                             result['metadata']['solved_similar'] = True
                             break
-        
-        # Re-sort after boosting
         results.sort(key=lambda x: x['relevance_score'], reverse=True)
         
         return results
@@ -428,18 +376,12 @@ class EnhancedRAGPipeline:
     def update_document_impact_scores(self):
         """Update impact scores for all documents based on their ticket relationships"""
         self.logger.info("Updating document impact scores")
-        
-        # Get all documents from ChromaDB
         all_docs = self.doc_collection.get()
         
         for i, doc_id in enumerate(all_docs['ids']):
             impact_score = self.neo4j_manager.get_document_impact_score(doc_id)
-            
-            # Update metadata in ChromaDB
             metadata = all_docs['metadatas'][i]
             metadata['impact_score'] = impact_score
-            
-            # Update the document
             self.doc_collection.update(
                 ids=[doc_id],
                 metadatas=[metadata]
@@ -447,21 +389,14 @@ class EnhancedRAGPipeline:
         
         self.logger.info("Impact scores updated")
 
-    # In orchestrator/rag/enhanced_rag_pipeline.py, add this method:
-
     def publish_article_to_confluence(self, 
                                     article: Dict[str, Any], 
                                     ticket_id: str,
                                     project_key: str) -> Dict[str, Any]:
         """Publish an approved article to Confluence"""
         try:
-            # Determine space key from project
-            space_key = project_key  # Or map to specific space if different
-            
-            # Create page content in Confluence storage format
+            space_key = project_key 
             content_html = self._markdown_to_confluence_html(article['content'])
-            
-            # Create the page
             url = f"{self.confluence_extractor.confluence_url}/rest/api/content"
             
             page_data = {
@@ -497,8 +432,6 @@ class EnhancedRAGPipeline:
                 page_url = f"{self.confluence_extractor.confluence_url}/pages/viewpage.action?pageId={page_id}"
                 
                 self.logger.info(f"✅ Published article to Confluence: {page_url}")
-                
-                # Now ingest this document into the RAG system
                 confluence_doc = {
                     'id': f"confluence_{page_id}",
                     'title': page_info['title'],
@@ -512,11 +445,7 @@ class EnhancedRAGPipeline:
                         'auto_published': True
                     }
                 }
-                
-                # Ingest into RAG
                 self.ingest_document(confluence_doc)
-                
-                # Create the ticket relationship in Neo4j
                 self._create_article_ticket_relationship(
                     doc_id=f"confluence_{page_id}",
                     ticket_id=ticket_id,
@@ -546,24 +475,17 @@ class EnhancedRAGPipeline:
     def _markdown_to_confluence_html(self, markdown_content: str) -> str:
         """Convert markdown to Confluence storage format"""
         import markdown
-        
-        # Basic conversion
         html = markdown.markdown(markdown_content)
         
-        # Convert some markdown elements to Confluence macros
-        # Headers
         html = re.sub(r'<h1>(.*?)</h1>', r'<h1>\1</h1>', html)
         html = re.sub(r'<h2>(.*?)</h2>', r'<h2>\1</h2>', html)
         
-        # Code blocks - convert to Confluence code macro
         html = re.sub(
             r'<pre><code class="language-(\w+)">(.*?)</code></pre>',
             r'<ac:structured-macro ac:name="code"><ac:parameter ac:name="language">\1</ac:parameter><ac:plain-text-body><![CDATA[\2]]></ac:plain-text-body></ac:structured-macro>',
             html,
             flags=re.DOTALL
         )
-        
-        # Info panels
         html = re.sub(
             r'<blockquote>(.*?)</blockquote>',
             r'<ac:structured-macro ac:name="info"><ac:rich-text-body>\1</ac:rich-text-body></ac:structured-macro>',
@@ -577,14 +499,9 @@ class EnhancedRAGPipeline:
         """Create RESOLVES relationship between article and ticket in Neo4j"""
         try:
             self.logger.info(f"🔗 Creating Neo4j relationship: {ticket_id} -> {doc_id}")
-            
-            # Create both nodes and the relationship in a single transaction
             with self.neo4j_manager.driver.session() as session:
                 try:
-                    # Use a transaction for atomicity
                     tx = session.begin_transaction()
-                    
-                    # Create or update the ticket
                     ticket_query = """
                     MERGE (t:Ticket {key: $ticket_key})
                     SET t.summary = COALESCE(t.summary, $summary),
@@ -603,8 +520,6 @@ class EnhancedRAGPipeline:
                         page_url=page_url,
                         doc_id=doc_id
                     )
-                    
-                    # Create or update the document
                     doc_query = """
                     MERGE (d:Document {id: $doc_id})
                     SET d.title = $title,
@@ -631,8 +546,6 @@ class EnhancedRAGPipeline:
                         content="Auto-generated article from JURIX",
                         metadata=doc_metadata
                     )
-                    
-                    # Create the RESOLVES relationship
                     rel_query = """
                     MATCH (t:Ticket {key: $ticket_key})
                     MATCH (d:Document {id: $doc_id})
@@ -650,12 +563,9 @@ class EnhancedRAGPipeline:
                         doc_id=doc_id,
                         page_url=page_url
                     )
-                    
-                    # Commit the transaction
                     tx.commit()
                     self.logger.info(f"✅ Transaction committed - relationship created")
                     
-                    # Verify the relationship
                     verify_query = """
                     MATCH (d:Document {id: $doc_id})-[r:RESOLVES]->(t:Ticket {key: $ticket_key})
                     RETURN count(r) as rel_count

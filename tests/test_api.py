@@ -11,31 +11,24 @@ from integrations.jira_api_client import JiraAPIClient
 def test_jira_connection():
     print("🧪 Testing Jira Connection...")
     print("=" * 60)
-    
-    # Show configuration
     APIConfig.log_config()
     print("=" * 60)
-    
-    # Create client
     client = JiraAPIClient()
     
-    # Test connection
+
     if client.test_connection():
         print("\n✅ Connection successful!")
-        
-        # Get projects
         print("\n📋 Fetching projects...")
         projects = client.get_projects()
         
         if projects:
             print(f"\nFound {len(projects)} projects:")
-            for i, project in enumerate(projects[:5]):  # Show first 5
+            for i, project in enumerate(projects[:5]):  
                 print(f"  {i+1}. {project['key']} - {project['name']}")
             
             if len(projects) > 5:
                 print(f"  ... and {len(projects) - 5} more")
-            
-            # Test fetching issues from first project
+
             if projects:
                 test_project = projects[0]['key']
                 print(f"\n📝 Testing issue retrieval for project: {test_project}")

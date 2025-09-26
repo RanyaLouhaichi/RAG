@@ -19,15 +19,12 @@ class Neo4jManager:
     def _initialize_schema(self):
         """Create indexes and constraints"""
         with self.driver.session() as session:
-            # Constraints
             constraints = [
                 "CREATE CONSTRAINT IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
                 "CREATE CONSTRAINT IF NOT EXISTS FOR (t:Ticket) REQUIRE t.key IS UNIQUE",
                 "CREATE CONSTRAINT IF NOT EXISTS FOR (p:Project) REQUIRE p.key IS UNIQUE",
                 "CREATE CONSTRAINT IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE",
             ]
-            
-            # Indexes for performance
             indexes = [
                 "CREATE INDEX IF NOT EXISTS FOR (d:Document) ON (d.title)",
                 "CREATE INDEX IF NOT EXISTS FOR (t:Ticket) ON (t.status)",
@@ -68,7 +65,7 @@ class Neo4jManager:
             result = session.run(query, 
                 doc_id=doc_id,
                 title=title,
-                content=content[:1000],  # Store preview
+                content=content[:1000],
                 source=metadata.get("source", "confluence"),
                 doc_type=metadata.get("type", "article"),
                 metadata=json.dumps(metadata)
@@ -110,7 +107,6 @@ class Neo4jManager:
                    status: str, metadata: Dict[str, Any]) -> str:
         """Add a ticket to the graph"""
         with self.driver.session() as session:
-            # Create ticket and link to project
             query = """
             MERGE (p:Project {key: $project_key})
             ON CREATE SET p.name = $project_key, p.created_at = datetime()
@@ -143,14 +139,11 @@ class Neo4jManager:
                            metadata: Dict[str, Any] = None):
         """Create a relationship between a document and a ticket"""
         with self.driver.session() as session:
-            # First ensure both nodes exist
             ensure_query = """
             MERGE (d:Document {id: $doc_id})
             MERGE (t:Ticket {key: $ticket_key})
             """
             session.run(ensure_query, doc_id=doc_id, ticket_key=ticket_key)
-            
-            # Then create the relationship
             query = """
             MATCH (d:Document {id: $doc_id})
             MATCH (t:Ticket {key: $ticket_key})
@@ -158,7 +151,7 @@ class Neo4jManager:
             SET r.created_at = datetime()
             SET r.metadata = $metadata
             RETURN d, r, t
-            """ % relationship_type  # Using string formatting for relationship type
+            """ % relationship_type  
             
             result = session.run(
                 query, 
@@ -317,7 +310,6 @@ class Neo4jManager:
                                    helpful: bool):
         """Update relationship strength based on feedback"""
         with self.driver.session() as session:
-            # Adjust confidence based on feedback
             adjustment = 0.1 if helpful else -0.1
             
             query = """

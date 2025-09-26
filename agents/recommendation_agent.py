@@ -39,9 +39,6 @@ class RecommendationAgent(BaseAgent):
         ])
         
         self.log(f"Enhanced RecommendationAgent initialized with collaborative capabilities")
-        
-        #self.monitoring_thread = threading.Thread(target=self._check_for_updates_loop, daemon=True)
-        #self.monitoring_thread.start()
 
     def _check_for_updates(self):
         try:
@@ -272,7 +269,6 @@ class RecommendationAgent(BaseAgent):
         Return ONLY the list of recommendations.<|assistant|>"""
 
         try:
-            # Use dynamic model selection
             response = self.model_manager.generate_response(
                 prompt=prompt_template,
                 context={

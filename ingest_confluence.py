@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Script to ingest Confluence spaces into the enhanced RAG system"""
 
 import os
@@ -21,7 +20,6 @@ def ingest_confluence_space(space_key: str, limit: int = 100):
     """Ingest a Confluence space"""
     logger.info(f"Starting ingestion for space: {space_key}")
     
-    # Initialize pipeline
     pipeline = EnhancedRAGPipeline(
         neo4j_uri=os.getenv("NEO4J_URI"),
         neo4j_user=os.getenv("NEO4J_USERNAME"),
@@ -30,8 +28,7 @@ def ingest_confluence_space(space_key: str, limit: int = 100):
         confluence_user=os.getenv("CONFLUENCE_USERNAME"),
         confluence_password=os.getenv("CONFLUENCE_PASSWORD")
     )
-    
-    # Ingest space
+
     pipeline.ingest_confluence_space(space_key, limit)
     
     logger.info(f"Completed ingestion for space: {space_key}")
@@ -39,18 +36,15 @@ def ingest_confluence_space(space_key: str, limit: int = 100):
 def sync_jira_tickets(project_key: str):
     """Sync Jira tickets to knowledge graph"""
     logger.info(f"Syncing Jira tickets for project: {project_key}")
-    
-    # Initialize Jira agent
+
     import redis
     redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
     jira_agent = JiraDataAgent(redis_client=redis_client)
-    
-    # Get tickets
+
     result = jira_agent.run({'project_id': project_key})
     tickets = result.get('tickets', [])
     
     if tickets:
-        # Initialize pipeline
         pipeline = EnhancedRAGPipeline(
             neo4j_uri=os.getenv("NEO4J_URI"),
             neo4j_user=os.getenv("NEO4J_USERNAME"),
@@ -59,8 +53,6 @@ def sync_jira_tickets(project_key: str):
             confluence_user=os.getenv("CONFLUENCE_USERNAME"),
             confluence_password=os.getenv("CONFLUENCE_PASSWORD")
         )
-        
-        # Add tickets to graph
         pipeline.add_jira_tickets(tickets)
         pipeline.update_document_impact_scores()
         
@@ -76,12 +68,9 @@ def main():
     parser.add_argument('--all-spaces', action='store_true', help='Ingest all available spaces')
     
     args = parser.parse_args()
-    
-    # Load environment
     load_dotenv()
     
     if args.all_spaces:
-        # Get all spaces
         from integrations.docling.confluence_extractor import ConfluenceDoclingExtractor
         extractor = ConfluenceDoclingExtractor(
             os.getenv("CONFLUENCE_URL"),

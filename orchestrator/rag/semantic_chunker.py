@@ -26,8 +26,6 @@ class SemanticChunkerWithLLMJudge:
         self.overlap = overlap
         self.judge_model = judge_model
         self.logger = logging.getLogger("SemanticChunker")
-        
-        # Initialize tokenizer for size estimation
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
     
     def chunk_document(self, text: str, metadata: Dict[str, Any] = None) -> List[SemanticChunk]:
@@ -53,16 +51,12 @@ class SemanticChunkerWithLLMJudge:
     def _initial_segmentation(self, text: str) -> List[str]:
         """Segment text by natural boundaries"""
         
-        # Split by multiple newlines (paragraphs)
         segments = re.split(r'\n\s*\n', text)
-        
-        # Further split by headers (markdown style)
         refined_segments = []
         for segment in segments:
-            if re.match(r'^#+\s', segment):  # Markdown header
+            if re.match(r'^#+\s', segment): 
                 refined_segments.append(segment)
             else:
-                # Split long paragraphs by sentences
                 if len(segment) > self.max_chunk_size:
                     sentences = re.split(r'(?<=[.!?])\s+', segment)
                     current = ""
@@ -90,12 +84,10 @@ class SemanticChunkerWithLLMJudge:
             segment_tokens = len(self.tokenizer.encode(segment))
             
             if segment_tokens > self.max_chunk_size:
-                # Split large segment
+
                 if current_segment:
                     sized_segments.append(current_segment)
                     current_segment = ""
-                
-                # Split by sentences
                 sentences = re.split(r'(?<=[.!?])\s+', segment)
                 for sentence in sentences:
                     if len(self.tokenizer.encode(current_segment + " " + sentence)) < self.max_chunk_size:
@@ -106,10 +98,8 @@ class SemanticChunkerWithLLMJudge:
                         current_segment = sentence
                         
             elif len(self.tokenizer.encode(current_segment + " " + segment)) < self.max_chunk_size:
-                # Merge with current
                 current_segment += "\n\n" + segment if current_segment else segment
             else:
-                # Start new segment
                 if current_segment:
                     sized_segments.append(current_segment)
                 current_segment = segment
@@ -126,18 +116,14 @@ class SemanticChunkerWithLLMJudge:
         full_text = "\n\n".join(segments)
         
         for i, segment in enumerate(segments):
-            # Find position in full text
             start_index = full_text.find(segment)
             end_index = start_index + len(segment)
             
-            # Add overlap from previous segment
             if i > 0 and self.overlap > 0:
                 prev_segment = segments[i-1]
                 overlap_text = prev_segment[-self.overlap:] if len(prev_segment) > self.overlap else prev_segment
                 segment = overlap_text + "\n\n" + segment
                 start_index = max(0, start_index - len(overlap_text) - 2)
-            
-            # Add overlap from next segment
             if i < len(segments) - 1 and self.overlap > 0:
                 next_segment = segments[i+1]
                 overlap_text = next_segment[:self.overlap] if len(next_segment) > self.overlap else next_segment
@@ -205,15 +191,11 @@ The score should be between 0.0 and 1.0."""
         while i < len(chunks):
             chunk = chunks[i]
             
-            if chunk.quality_score < 0.6:  # Low quality threshold
+            if chunk.quality_score < 0.6:  
                 self.logger.info(f"Improving low quality chunk at index {i}")
-                
-                # Try to merge with adjacent chunks
                 if i > 0 and chunks[i-1].quality_score >= 0.7:
-                    # Merge with previous
                     merged_content = chunks[i-1].content + "\n\n" + chunk.content
                     if len(self.tokenizer.encode(merged_content)) <= self.max_chunk_size * 1.2:
-                        # Remove last chunk and create merged
                         final_chunks.pop()
                         merged_chunk = SemanticChunk(
                             content=merged_content,
@@ -221,12 +203,9 @@ The score should be between 0.0 and 1.0."""
                             end_index=chunk.end_index,
                             metadata={**chunks[i-1].metadata, **chunk.metadata}
                         )
-                        # Re-evaluate merged chunk
                         final_chunks.extend(self._evaluate_chunks([merged_chunk]))
                         i += 1
                         continue
-                
-                # If can't merge, try to expand context
                 expanded_start = max(0, chunk.start_index - 100)
                 expanded_end = min(len(original_text), chunk.end_index + 100)
                 expanded_content = original_text[expanded_start:expanded_end]
@@ -237,13 +216,11 @@ The score should be between 0.0 and 1.0."""
                     end_index=expanded_end,
                     metadata=chunk.metadata
                 )
-                
-                # Re-evaluate
                 evaluated = self._evaluate_chunks([expanded_chunk])
                 if evaluated[0].quality_score > chunk.quality_score:
                     final_chunks.append(evaluated[0])
                 else:
-                    final_chunks.append(chunk)  # Keep original
+                    final_chunks.append(chunk) 
             else:
                 final_chunks.append(chunk)
             
@@ -255,8 +232,6 @@ The score should be between 0.0 and 1.0."""
         """Special handling for Confluence documents"""
         
         chunks = []
-        
-        # Chunk main content
         main_chunks = self.chunk_document(
             document['content'],
             metadata={
@@ -266,13 +241,11 @@ The score should be between 0.0 and 1.0."""
             }
         )
         chunks.extend(main_chunks)
-        
-        # Chunk tables separately
         for i, table in enumerate(document.get('extracted_elements', {}).get('tables', [])):
             table_text = self._table_to_text(table)
             table_chunk = SemanticChunk(
                 content=table_text,
-                start_index=-1,  # Not from main text
+                start_index=-1,  
                 end_index=-1,
                 metadata={
                     'doc_id': document['id'],
@@ -280,11 +253,9 @@ The score should be between 0.0 and 1.0."""
                     'section': 'table',
                     'table_index': i
                 },
-                quality_score=0.9  # Tables are usually complete
+                quality_score=0.9  
             )
             chunks.append(table_chunk)
-        
-        # Chunk code blocks
         for i, code_block in enumerate(document.get('extracted_elements', {}).get('code_blocks', [])):
             code_chunk = SemanticChunk(
                 content=f"Code ({code_block['language']}):\n{code_block['code']}",
@@ -297,7 +268,7 @@ The score should be between 0.0 and 1.0."""
                     'code_index': i,
                     'language': code_block['language']
                 },
-                quality_score=0.95  # Code blocks are self-contained
+                quality_score=0.95  
             )
             chunks.append(code_chunk)
         
@@ -306,13 +277,9 @@ The score should be between 0.0 and 1.0."""
     def _table_to_text(self, table: Dict[str, Any]) -> str:
         """Convert table to readable text"""
         lines = []
-        
-        # Headers
         if table.get('headers'):
             lines.append(" | ".join(table['headers']))
             lines.append("-" * 50)
-        
-        # Rows
         for row in table.get('rows', []):
             lines.append(" | ".join(str(cell) for cell in row))
         

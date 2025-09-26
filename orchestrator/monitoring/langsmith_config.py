@@ -10,10 +10,7 @@ import json
 import uuid
 from contextlib import contextmanager
 
-# Load environment variables
 load_dotenv(override=True)
-
-# Configure LangSmith
 os.environ["LANGCHAIN_TRACING_V2"] = os.getenv("LANGCHAIN_TRACING_V2", "true")
 os.environ["LANGCHAIN_API_KEY"] = os.getenv("LANGCHAIN_API_KEY", "")
 os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "JURIX-Thesis-Demo")
@@ -34,8 +31,6 @@ class LangSmithMonitor:
             self.client = Client()
             self.enabled = True
             self.project_name = os.getenv("LANGCHAIN_PROJECT", "JURIX-Thesis-Demo")
-            
-            # Metrics collection
             self.metrics = {
                 "total_runs": 0,
                 "agent_runs": {},
@@ -44,11 +39,7 @@ class LangSmithMonitor:
                 "latencies": [],
                 "collaboration_traces": []
             }
-            
-            # Active runs tracking
             self.active_runs = {}
-            
-            # Test connection
             self._test_connection()
             
             logger.info(f"✅ LangSmith monitoring initialized for project: {self.project_name}")
@@ -61,7 +52,6 @@ class LangSmithMonitor:
     def _test_connection(self):
         """Test LangSmith connection"""
         try:
-            # Try to list projects to verify connection
             projects = list(self.client.list_projects(limit=1))
             logger.info(f"✅ LangSmith connection verified. Found {len(projects)} project(s)")
             return True
@@ -102,8 +92,6 @@ class LangSmithMonitor:
         
         try:
             yield run_tree
-            
-            # Post successful completion
             run_tree.end(outputs={
                 "status": "success",
                 "duration": time.time() - start_time
@@ -111,7 +99,6 @@ class LangSmithMonitor:
             run_tree.post()
             
         except Exception as e:
-            # Post error
             run_tree.end(
                 outputs={"status": "error", "error": str(e)},
                 error=str(e)
@@ -126,15 +113,12 @@ class LangSmithMonitor:
             raise
         
         finally:
-            # Record latency
             latency = time.time() - start_time
             self.metrics["latencies"].append({
                 "workflow": workflow_name,
                 "latency": latency,
                 "timestamp": datetime.now().isoformat()
             })
-            
-            # Clean up
             if run_id in self.active_runs:
                 del self.active_runs[run_id]
     
@@ -145,14 +129,12 @@ class LangSmithMonitor:
             def wrapper(*args, **kwargs):
                 if not self.enabled:
                     return func(*args, **kwargs)
-                
-                # Create child run
                 run_tree = RunTree(
                     name=f"Agent: {agent_name}",
                     run_type="llm" if "llm" in agent_name.lower() else "tool",
                     inputs={
                         "agent": agent_name,
-                        "args": str(args)[:500],  # Truncate for size
+                        "args": str(args)[:500], 
                         "kwargs": str(kwargs)[:500]
                     },
                     parent_run=parent_run,
@@ -163,8 +145,6 @@ class LangSmithMonitor:
                         "timestamp": datetime.now().isoformat()
                     }
                 )
-                
-                # Update metrics
                 if agent_name not in self.metrics["agent_runs"]:
                     self.metrics["agent_runs"][agent_name] = 0
                 self.metrics["agent_runs"][agent_name] += 1
@@ -172,12 +152,9 @@ class LangSmithMonitor:
                 start_time = time.time()
                 
                 try:
-                    # Execute the actual function
                     result = func(*args, **kwargs)
-                    
-                    # Post successful completion
                     run_tree.end(outputs={
-                        "result": str(result)[:1000],  # Truncate
+                        "result": str(result)[:1000], 
                         "duration": time.time() - start_time,
                         "status": "success"
                     })
@@ -186,7 +163,6 @@ class LangSmithMonitor:
                     return result
                     
                 except Exception as e:
-                    # Post error
                     run_tree.end(
                         outputs={"status": "error", "error": str(e)},
                         error=str(e)
@@ -219,8 +195,6 @@ class LangSmithMonitor:
                 "timestamp": datetime.now().isoformat()
             }
         )
-        
-        # Track collaboration
         self.metrics["collaboration_traces"].append({
             "from": requesting_agent,
             "to": collaborating_agent,
@@ -243,10 +217,10 @@ class LangSmithMonitor:
             inputs={
                 "agent": agent_name,
                 "model": model_name,
-                "prompt": prompt[:1000]  # Truncate
+                "prompt": prompt[:1000]  
             },
             outputs={
-                "response": response[:1000],  # Truncate
+                "response": response[:1000],  
                 "latency": latency
             },
             parent_run=parent_run,
@@ -273,8 +247,6 @@ class LangSmithMonitor:
                 dataset_name=name,
                 description=f"Test dataset for {name} - JURIX Thesis Demo"
             )
-            
-            # Add examples
             for example in examples:
                 self.client.create_example(
                     inputs=example.get("inputs", {}),
@@ -313,24 +285,16 @@ class LangSmithMonitor:
         """Get comprehensive metrics summary for thesis presentation"""
         if not self.enabled:
             return {"status": "LangSmith not enabled"}
-        
-        # Calculate aggregated metrics
         total_agent_runs = sum(self.metrics["agent_runs"].values())
         total_workflow_runs = sum(self.metrics["workflow_runs"].values())
-        
-        # Calculate average latency
         avg_latency = 0
         if self.metrics["latencies"]:
             avg_latency = sum(l["latency"] for l in self.metrics["latencies"]) / len(self.metrics["latencies"])
-        
-        # Get most active agents
         most_active_agents = sorted(
             self.metrics["agent_runs"].items(), 
             key=lambda x: x[1], 
             reverse=True
         )[:5]
-        
-        # Collaboration network stats
         collaboration_network = {}
         for collab in self.metrics["collaboration_traces"]:
             key = f"{collab['from']} → {collab['to']}"
@@ -363,7 +327,7 @@ class LangSmithMonitor:
                 "unique_collaboration_pairs": len(collaboration_network)
             },
             "thesis_metrics": {
-                "system_complexity": len(self.metrics["agent_runs"]),  # Number of unique agents
+                "system_complexity": len(self.metrics["agent_runs"]),  
                 "system_reliability": 1 - (len(self.metrics["errors"]) / max(self.metrics["total_runs"], 1)),
                 "collaboration_density": len(self.metrics["collaboration_traces"]) / max(total_agent_runs, 1),
                 "avg_response_time": round(avg_latency, 3)
@@ -375,9 +339,9 @@ class LangSmithMonitor:
         metrics = self.get_metrics_summary()
         metrics["export_timestamp"] = datetime.now().isoformat()
         metrics["raw_data"] = {
-            "latencies": self.metrics["latencies"][-100:],  # Last 100
-            "errors": self.metrics["errors"][-50:],  # Last 50
-            "collaborations": self.metrics["collaboration_traces"][-100:]  # Last 100
+            "latencies": self.metrics["latencies"][-100:], 
+            "errors": self.metrics["errors"][-50:],  
+            "collaborations": self.metrics["collaboration_traces"][-100:]  
         }
         
         with open(filepath, 'w') as f:
@@ -386,5 +350,4 @@ class LangSmithMonitor:
         logger.info(f"✅ Exported thesis metrics to {filepath}")
         return filepath
 
-# Create global instance
 langsmith_monitor = LangSmithMonitor()

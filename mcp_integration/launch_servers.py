@@ -28,11 +28,7 @@ class MCPServerLauncher:
             
             self.servers[name] = process
             logger.info(f"Started {name} server (PID: {process.pid})")
-            
-            # Give it time to start
             time.sleep(2)
-            
-            # Check if it's still running
             if process.poll() is not None:
                 stderr = process.stderr.read()
                 raise Exception(f"Server {name} failed to start: {stderr}")
@@ -66,7 +62,6 @@ if __name__ == "__main__":
     try:
         launcher.start_all_servers()
         logger.info("All MCP servers started. Press Ctrl+C to stop.")
-        # Keep running
         while True:
             time.sleep(1)
     except KeyboardInterrupt:

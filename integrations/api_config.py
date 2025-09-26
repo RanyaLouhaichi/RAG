@@ -2,32 +2,22 @@ import os
 from dotenv import load_dotenv
 from typing import Dict, Any
 
-# Load environment variables
 load_dotenv()
 
 class APIConfig:
-    """Configuration for Jira and Confluence APIs"""
-    
-    # Jira Configuration
     JIRA_URL = os.getenv("JIRA_URL", "http://localhost:8080")
     JIRA_USERNAME = os.getenv("JIRA_USERNAME", "admin")
     JIRA_PASSWORD = os.getenv("JIRA_PASSWORD", "")
-    
-    # Confluence Configuration
+
     CONFLUENCE_URL = os.getenv("CONFLUENCE_URL", "http://localhost:8090")
     CONFLUENCE_USERNAME = os.getenv("CONFLUENCE_USERNAME", "admin")
     CONFLUENCE_PASSWORD = os.getenv("CONFLUENCE_PASSWORD", "")
     
-    # API Settings
     API_TIMEOUT = int(os.getenv("API_TIMEOUT", "30"))
     API_MAX_RETRIES = int(os.getenv("API_MAX_RETRIES", "3"))
     API_PAGE_SIZE = int(os.getenv("API_PAGE_SIZE", "50"))
-    
-    # Environment
     ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
     DEBUG = os.getenv("DEBUG", "true").lower() == "true"
-    
-    # SSL Verification (disable for local Docker)
     VERIFY_SSL = False if ENVIRONMENT == "development" else True
     
     @classmethod

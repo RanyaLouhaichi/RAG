@@ -1,6 +1,4 @@
 # agents/cognitive_core.py
-# The cognitive foundation that transforms your agents into sophisticated reasoners
-# This file contains the enhanced belief system and cognitive capabilities
 
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime, timedelta
@@ -20,12 +18,12 @@ class ConfidenceLevel(Enum):
 
 class InformationSource(Enum):
     """Types of information sources with different credibility patterns"""
-    DIRECT_OBSERVATION = "direct_observation"  # Agent's own experience
-    TRUSTED_AGENT = "trusted_agent"           # From known reliable agents
-    EXTERNAL_API = "external_api"             # From external systems
-    USER_INPUT = "user_input"                 # From human users
-    INFERRED = "inferred"                     # Derived through reasoning
-    HISTORICAL_DATA = "historical_data"       # From past records
+    DIRECT_OBSERVATION = "direct_observation"  
+    TRUSTED_AGENT = "trusted_agent"          
+    EXTERNAL_API = "external_api"           
+    USER_INPUT = "user_input"                 
+    INFERRED = "inferred"                    
+    HISTORICAL_DATA = "historical_data"      
 
 @dataclass
 class ConfidentBelief:
@@ -36,15 +34,15 @@ class ConfidentBelief:
     This is the foundation of intelligent reasoning - understanding
     the quality and reliability of our own knowledge.
     """
-    value: Any                              # The actual belief content
-    confidence: float                       # How confident we are (0.0 to 1.0)
-    source: InformationSource              # Where this belief came from
-    created_at: datetime                   # When we learned this
-    last_updated: datetime                 # When we last confirmed/updated this
-    evidence_count: int = 0                # How many pieces of evidence support this
-    contradiction_count: int = 0           # How many contradictions we've seen
-    temporal_decay_rate: float = 0.01      # How quickly confidence fades over time
-    context_tags: List[str] = field(default_factory=list)  # What contexts this applies to
+    value: Any                            
+    confidence: float                       
+    source: InformationSource             
+    created_at: datetime                   
+    last_updated: datetime                 
+    evidence_count: int = 0               
+    contradiction_count: int = 0           
+    temporal_decay_rate: float = 0.01      
+    context_tags: List[str] = field(default_factory=list)  
     
     def __post_init__(self):
         """Initialize computed properties after creation"""
@@ -63,14 +61,11 @@ class ConfidentBelief:
         time_elapsed = datetime.now() - self.last_updated
         days_elapsed = time_elapsed.total_seconds() / (24 * 3600)
         
-        # Apply exponential decay - information becomes less reliable over time
         decay_factor = math.exp(-self.temporal_decay_rate * days_elapsed)
         base_confidence = self.confidence * decay_factor
         
-        # Factor in evidence vs contradictions - more evidence increases confidence
         evidence_factor = self.evidence_count / (self.evidence_count + self.contradiction_count + 1)
-        
-        # Combine factors with some minimum confidence to avoid complete certainty loss
+       
         final_confidence = max(0.05, base_confidence * (0.5 + 0.5 * evidence_factor))
         
         return min(1.0, final_confidence)
@@ -85,7 +80,6 @@ class ConfidentBelief:
         self.evidence_count += 1
         self.last_updated = datetime.now()
         
-        # Boost confidence based on evidence accumulation with diminishing returns
         confidence_boost = 0.1 * (1.0 - self.confidence)
         self.confidence = min(1.0, self.confidence + confidence_boost)
     
@@ -99,7 +93,6 @@ class ConfidentBelief:
         self.contradiction_count += 1
         self.last_updated = datetime.now()
         
-        # Reduce confidence based on contradictions - proportional to current confidence
         confidence_reduction = 0.2 * self.confidence
         self.confidence = max(0.05, self.confidence - confidence_reduction)
     
@@ -124,21 +117,18 @@ class CognitiveBeliefSystem:
     def __init__(self, agent_name: str):
         self.agent_name = agent_name
         self.beliefs: Dict[str, ConfidentBelief] = {}
-        
-        # Track how reliable different sources have been historically
-        # These values will be learned and adjusted over time based on experience
+    
         self.source_reliability: Dict[str, float] = {
-            "self": 0.8,                    # Agent's own observations
-            "trusted_agents": 0.7,          # Other agents in the system
-            "external_apis": 0.6,           # External data sources
-            "user_input": 0.5,             # Human input (can be uncertain)
-            "inferred": 0.4                 # Derived conclusions
+            "self": 0.8,                    
+            "trusted_agents": 0.7,          
+            "external_apis": 0.6,           
+            "user_input": 0.5,            
+            "inferred": 0.4                
         }
         
-        # Track relationships between beliefs for more sophisticated reasoning
         self.belief_networks: Dict[str, List[str]] = {}
         
-        # Initialize logging for cognitive processes
+    
         self.logger = logging.getLogger(f"CognitiveBeliefs-{agent_name}")
     
     def believe(self, key: str, value: Any, confidence: float = None, 
@@ -153,28 +143,24 @@ class CognitiveBeliefSystem:
         current_time = datetime.now()
         context_tags = context_tags or []
         
-        # Determine confidence if not explicitly provided
+       
         if confidence is None:
             confidence = self._estimate_confidence(source, value)
         
-        # Check if we already have a belief about this topic
         if key in self.beliefs:
             existing_belief = self.beliefs[key]
             
-            # If the new information matches existing belief, strengthen it
             if self._values_match(existing_belief.value, value):
                 existing_belief.add_supporting_evidence(source)
                 existing_belief.context_tags.extend(context_tags)
                 self.logger.debug(f"Strengthened belief '{key}' with supporting evidence")
                 return existing_belief
             
-            # If it contradicts, we need to reason about which to trust
             else:
                 self.logger.debug(f"Belief conflict detected for '{key}' - resolving...")
                 return self._resolve_belief_conflict(key, existing_belief, value, 
                                                    confidence, source, context_tags)
         
-        # Create new belief when we don't have existing knowledge
         new_belief = ConfidentBelief(
             value=value,
             confidence=confidence,
@@ -194,7 +180,7 @@ class CognitiveBeliefSystem:
         
         This is how agents develop intuition about information quality.
         """
-        # Base confidence levels for different information sources
+     
         base_confidence = {
             InformationSource.DIRECT_OBSERVATION: 0.8,
             InformationSource.TRUSTED_AGENT: 0.7,
@@ -204,12 +190,10 @@ class CognitiveBeliefSystem:
             InformationSource.HISTORICAL_DATA: 0.5
         }.get(source, 0.5)
         
-        # Adjust confidence based on characteristics of the value itself
         if isinstance(value, (int, float)) and value != 0:
-            # Numerical values with specific numbers often more reliable than vague estimates
             base_confidence += 0.1
         elif isinstance(value, str) and len(value) > 100:
-            # Detailed text descriptions might indicate more thorough analysis
+
             base_confidence += 0.05
         elif isinstance(value, list) and len(value) > 3:
             # Multiple data points suggest more comprehensive information
@@ -218,13 +202,7 @@ class CognitiveBeliefSystem:
         return min(1.0, base_confidence)
     
     def _values_match(self, value1: Any, value2: Any, tolerance: float = 0.1) -> bool:
-        """
-        Determine if two values are essentially the same, accounting for
-        reasonable variations in numerical data or minor text differences.
-        
-        This sophisticated matching helps agents recognize when different
-        sources are providing consistent information.
-        """
+  
         if type(value1) != type(value2):
             return False
         
@@ -259,21 +237,19 @@ class CognitiveBeliefSystem:
         """
         current_confidence = existing_belief.current_confidence()
         
-        # Record the contradiction in existing belief for future reference
         existing_belief.add_contradiction(new_value, new_source)
         
         self.logger.debug(f"Resolving conflict for '{key}': existing confidence {current_confidence:.2f} vs new {new_confidence:.2f}")
-        
-        # Decide which belief to keep based on confidence and other factors
-        if new_confidence > current_confidence * 1.2:  # Significantly more confident
-            # Replace with new belief but preserve some history about the conflict
+
+        if new_confidence > current_confidence * 1.2: 
+          
             new_belief = ConfidentBelief(
                 value=new_value,
                 confidence=new_confidence,
                 source=new_source,
                 created_at=datetime.now(),
                 last_updated=datetime.now(),
-                contradiction_count=1,  # Note there was conflicting info
+                contradiction_count=1, 
                 context_tags=context_tags
             )
             self.beliefs[key] = new_belief
@@ -281,8 +257,7 @@ class CognitiveBeliefSystem:
             return new_belief
         
         else:
-            # Keep existing belief but note we've seen conflicting information
-            # This uncertainty will affect future decision-making appropriately
+
             self.logger.debug(f"Kept existing belief '{key}' despite conflicting information")
             return existing_belief
     
@@ -337,18 +312,15 @@ class CognitiveBeliefSystem:
         to fill gaps in their understanding.
         """
         suggestions = []
-        
-        # Find beliefs that need verification due to low confidence
+ 
         uncertain_beliefs = self.get_uncertain_beliefs(0.5)
         if uncertain_beliefs:
             suggestions.append(f"Verify uncertain beliefs: {list(uncertain_beliefs.keys())[:3]}")
-        
-        # Find stale beliefs that might need updating
+
         stale_beliefs = [key for key, belief in self.beliefs.items() if belief.is_stale()]
         if stale_beliefs:
             suggestions.append(f"Update stale information: {stale_beliefs[:3]}")
-        
-        # Suggest areas where more evidence would help build confidence
+
         low_evidence = [
             key for key, belief in self.beliefs.items() 
             if belief.evidence_count < 2 and belief.current_confidence() < 0.8
@@ -368,23 +340,20 @@ class EnhancedMentalState:
     """
     
     def __init__(self, agent_name: str):
-        # Your existing mental state components - these remain exactly the same
+
         self.capabilities: List[str] = []
         self.obligations: List[str] = []
         self.decisions: List[Dict[str, Any]] = []
         
-        # Enhanced cognitive components that add sophisticated reasoning
         self.belief_system = CognitiveBeliefSystem(agent_name)
         self.reasoning_context: Dict[str, Any] = {}
-        
-        # Configurable confidence thresholds for different types of decisions
+ 
         self.confidence_thresholds = {
-            "action": 0.6,        # Minimum confidence to take action
-            "collaboration": 0.4,  # When to ask for help from other agents
-            "certainty": 0.8      # When to express high confidence in responses
+            "action": 0.6,       
+            "collaboration": 0.4, 
+            "certainty": 0.8      
         }
-        
-        # Compatibility layer - your existing code can still access beliefs as a dict
+
         self.beliefs = CognitiveBeliefProxy(self.belief_system)
     
     def update_belief(self, key: str, value: Any, **kwargs) -> ConfidentBelief:
@@ -402,7 +371,7 @@ class EnhancedMentalState:
         """Determine if agent should request collaboration on this topic"""
         belief = self.belief_system.get_belief(topic)
         if not belief:
-            return True  # Don't know anything about this topic
+            return True 
         
         return belief.current_confidence() < self.confidence_thresholds["collaboration"]
     
@@ -418,7 +387,7 @@ class EnhancedMentalState:
         elif confidence < 0.6:
             return f"I have some information about {topic}, but I'm not very confident ({confidence:.1%})."
         
-        return None  # Confident enough not to express uncertainty
+        return None 
 
 class CognitiveBeliefProxy:
     """

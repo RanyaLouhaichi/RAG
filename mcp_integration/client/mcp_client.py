@@ -14,36 +14,29 @@ class MCPClient:
         self.redis_client = redis_client
         self.logger = logging.getLogger("MCPClient")
         self.sessions: Dict[str, ClientSession] = {}
-        self._contexts: Dict[str, Any] = {}  # Store context managers
+        self._contexts: Dict[str, Any] = {}  
         
     async def connect_to_server(self, server_name: str, server_command: List[str]) -> ClientSession:
         """Connect to an MCP server"""
         try:
             if server_name in self.sessions:
                 return self.sessions[server_name]
-            
-            # Create server parameters
+          
             server_params = StdioServerParameters(
                 command=server_command[0],
                 args=server_command[1:] if len(server_command) > 1 else [],
                 env=None
             )
-            
-            # Create client context
+         
             context = stdio_client(server_params)
             read_stream, write_stream = await context.__aenter__()
-            
-            # Store context for cleanup
             self._contexts[server_name] = context
-            
-            # Create session
+        
             session = ClientSession(read_stream, write_stream)
             await session.__aenter__()
-            
-            # Initialize session
+  
             await session.initialize()
-            
-            # Store session
+
             self.sessions[server_name] = session
             self.logger.info(f"Connected to MCP server: {server_name}")
             
@@ -59,14 +52,11 @@ class MCPClient:
             session = self.sessions.get(server_name)
             if not session:
                 raise ValueError(f"Not connected to server: {server_name}")
-            
-            # Call tool
+
             result = await session.call_tool(tool_name, arguments)
-            
-            # Log tool call
+ 
             self._log_tool_call(server_name, tool_name, arguments, result)
-            
-            # Parse result
+
             if hasattr(result, 'content') and result.content:
                 return json.loads(result.content[0].text)
             return result
@@ -81,11 +71,9 @@ class MCPClient:
             session = self.sessions.get(server_name)
             if not session:
                 raise ValueError(f"Not connected to server: {server_name}")
-            
-            # Read resource
+
             result = await session.read_resource(resource_uri)
-            
-            # Parse result
+
             if hasattr(result, 'contents') and result.contents:
                 return json.loads(result.contents[0].text)
             return result
@@ -100,8 +88,7 @@ class MCPClient:
             session = self.sessions.get(server_name)
             if not session:
                 raise ValueError(f"Not connected to server: {server_name}")
-            
-            # Get prompt
+
             result = await session.get_prompt(prompt_name, arguments)
             
             return result
@@ -116,23 +103,15 @@ class MCPClient:
             session = self.sessions.get(server_name)
             if not session:
                 raise ValueError(f"Not connected to server: {server_name}")
-            
-            # List tools
-            tools = await session.list_tools()
-            
-            # List resources  
+            tools = await session.list_tools() 
             resources = await session.list_resources()
-            
-            # List prompts
             prompts = await session.list_prompts()
-            
             return {
                 "server": server_name,
                 "tools": [{"name": t.name, "description": t.description} for t in tools],
                 "resources": [{"uri": r.uri, "name": r.name} for r in resources],
                 "prompts": [{"name": p.name, "description": p.description} for p in prompts]
             }
-            
         except Exception as e:
             self.logger.error(f"Capability discovery failed: {server_name} - {e}")
             raise
@@ -146,7 +125,6 @@ class MCPClient:
             "result_size": len(str(result)),
             "timestamp": datetime.now().isoformat()
         }
-        
         log_key = f"mcp_client_calls:{datetime.now().strftime('%Y%m%d')}"
         self.redis_client.lpush(log_key, json.dumps(log_entry))
         self.redis_client.expire(log_key, 86400 * 7)
@@ -155,11 +133,8 @@ class MCPClient:
         """Close all connections"""
         for server_name in list(self.sessions.keys()):
             try:
-                # Close session
                 session = self.sessions[server_name]
                 await session.__aexit__(None, None, None)
-                
-                # Close context
                 if server_name in self._contexts:
                     context = self._contexts[server_name]
                     await context.__aexit__(None, None, None)

@@ -20,15 +20,9 @@ class MCPManager:
         self.orchestrator = orchestrator
         self.redis_client = orchestrator.shared_memory.redis_client
         self.logger = logging.getLogger("MCPManager")
-        
-        # Server instances
         self.servers = {}
-        
-        # Client instance
         self.mcp_client = MCPClient(self.redis_client)
         self.agent_client = MCPAgentClient(self.mcp_client)
-        
-        # Server configurations
         self.server_configs = {
             "chat_agent": {
                 "class": ChatAgentMCPServer,
@@ -108,8 +102,6 @@ class MCPManager:
         """Connect MCP client to all servers"""
         for server_name, config in self.server_configs.items():
             try:
-                # For now, using stdio transport
-                # In production, you'd use the actual server command
                 server_command = [sys.executable, "-m", f"mcp_servers.{server_name}"]
                 
                 await self.mcp_client.connect_to_server(server_name, server_command)
@@ -148,8 +140,5 @@ class MCPManager:
     
     async def shutdown(self):
         """Shutdown MCP system"""
-        # Close client connections
         await self.mcp_client.close_all()
-        
-        # Stop servers (in real implementation)
         self.logger.info("MCP system shutdown complete")

@@ -38,30 +38,21 @@ class VectorMemoryManager:
     def __init__(self, redis_client: Optional[redis.Redis] = None):
         self.redis_client = redis_client or redis.Redis(host='localhost', port=6379, decode_responses=True)
         self.logger = logging.getLogger("VectorMemoryManager")
-        
-        # Initialize sentence transformer for embeddings
         try:
             self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
-            self.embedding_dim = 384  # Dimension of all-MiniLM-L6-v2
+            self.embedding_dim = 384  
             self.logger.info("Initialized SentenceTransformer for embeddings")
         except Exception as e:
             self.logger.error(f"Failed to initialize SentenceTransformer: {e}")
             raise
-        
-        # Memory settings
         self.max_memories_per_agent = 1000
-        self.similarity_threshold = 0.5  # Lowered from 0.7 for better recall
+        self.similarity_threshold = 0.5  
         self.memory_decay_days = 30
-        
-        # Initialize Redis indices for vector search
         self._initialize_vector_indices()
         
     def _initialize_vector_indices(self):
         """Initialize Redis vector search indices"""
         try:
-            # Check if we have Redis with vector capabilities
-            # For now, we'll simulate with regular Redis operations
-            # In production, you'd use Redis with RediSearch module
             self.logger.info("Vector indices initialized (using Redis hash simulation)")
         except Exception as e:
             self.logger.warning(f"Vector index initialization failed: {e}")
@@ -80,8 +71,6 @@ class VectorMemoryManager:
         try:
             v1 = np.array(vector1)
             v2 = np.array(vector2)
-            
-            # Cosine similarity
             dot_product = np.dot(v1, v2)
             norm_v1 = np.linalg.norm(v1)
             norm_v2 = np.linalg.norm(v2)
@@ -99,13 +88,8 @@ class VectorMemoryManager:
                     metadata: Dict[str, Any] = None, confidence: float = 0.5) -> str:
         """Store a memory with semantic embedding"""
         try:
-            # Generate unique ID
             memory_id = f"memory:{agent_id}:{memory_type.value}:{hashlib.md5(content.encode()).hexdigest()[:8]}"
-            
-            # Generate embedding
             vector = self._generate_embedding(content)
-            
-            # Create memory object
             memory = SemanticMemory(
                 id=memory_id,
                 agent_id=agent_id,
@@ -116,8 +100,6 @@ class VectorMemoryManager:
                 vector=vector,
                 confidence=confidence
             )
-            
-            # Store in Redis
             memory_data = {
                 "id": memory.id,
                 "agent_id": memory.agent_id,
@@ -129,21 +111,14 @@ class VectorMemoryManager:
                 "confidence": memory.confidence,
                 "access_count": memory.access_count
             }
-            
-            # Store memory
             self.redis_client.hset(memory_id, mapping=memory_data)
             self.redis_client.expire(memory_id, int(timedelta(days=self.memory_decay_days).total_seconds()))
-            
-            # Add to agent's memory index
             agent_memories_key = f"agent_memories:{agent_id}"
             self.redis_client.sadd(agent_memories_key, memory_id)
             self.redis_client.expire(agent_memories_key, int(timedelta(days=self.memory_decay_days).total_seconds()))
-            
-            # Add to type-based index
             type_memories_key = f"type_memories:{memory_type.value}"
             self.redis_client.sadd(type_memories_key, memory_id)
             self.redis_client.expire(type_memories_key, int(timedelta(days=self.memory_decay_days).total_seconds()))
-            
             self.logger.info(f"Stored memory {memory_id} for agent {agent_id}")
             return memory_id
             
@@ -156,13 +131,8 @@ class VectorMemoryManager:
                        max_results: int = 10) -> List[SemanticMemory]:
         """Search memories by semantic similarity"""
         try:
-            # Generate query embedding
             query_vector = self._generate_embedding(query)
-            
-            # Get candidate memories
             candidates = self._get_candidate_memories(agent_id, memory_type)
-            
-            # Calculate similarities and rank
             scored_memories = []
             for memory_id in candidates:
                 memory = self._load_memory(memory_id)
@@ -170,12 +140,8 @@ class VectorMemoryManager:
                     similarity = self._calculate_similarity(query_vector, memory.vector)
                     if similarity >= self.similarity_threshold:
                         scored_memories.append((similarity, memory))
-            
-            # Sort by similarity and return top results
             scored_memories.sort(key=lambda x: x[0], reverse=True)
             results = [memory for _, memory in scored_memories[:max_results]]
-            
-            # Update access statistics
             for memory in results:
                 self._update_access_stats(memory.id)
             
@@ -191,7 +157,6 @@ class VectorMemoryManager:
         """Get candidate memory IDs for search"""
         try:
             if agent_id and memory_type:
-                # Get intersection of agent and type memories
                 agent_key = f"agent_memories:{agent_id}"
                 type_key = f"type_memories:{memory_type.value}"
                 temp_key = f"temp_intersection:{agent_id}:{memory_type.value}"
@@ -201,18 +166,15 @@ class VectorMemoryManager:
                 self.redis_client.delete(temp_key)
                 
             elif agent_id:
-                # Get all memories for agent
                 agent_key = f"agent_memories:{agent_id}"
                 candidates = list(self.redis_client.smembers(agent_key))
                 
             elif memory_type:
-                # Get all memories of type
                 type_key = f"type_memories:{memory_type.value}"
                 candidates = list(self.redis_client.smembers(type_key))
                 
             else:
-                # Get all memory keys (expensive - limit this)
-                candidates = list(self.redis_client.keys("memory:*"))[:1000]  # Limit to prevent performance issues
+                candidates = list(self.redis_client.keys("memory:*"))[:1000]  
             
             return candidates
             
@@ -261,17 +223,14 @@ class VectorMemoryManager:
     def find_related_memories(self, memory_id: str, max_results: int = 5) -> List[SemanticMemory]:
         """Find memories related to a specific memory"""
         try:
-            # Load the source memory
             source_memory = self._load_memory(memory_id)
             if not source_memory:
                 return []
-            
-            # Search for similar memories
             return self.search_memories(
                 query=source_memory.content,
-                agent_id=None,  # Search across all agents
-                max_results=max_results + 1  # +1 because we'll filter out the source
-            )[1:]  # Remove the first result (which should be the source memory itself)
+                agent_id=None,  
+                max_results=max_results + 1  
+            )[1:]  
             
         except Exception as e:
             self.logger.error(f"Failed to find related memories: {e}")
@@ -282,8 +241,6 @@ class VectorMemoryManager:
         try:
             agent_key = f"agent_memories:{agent_id}"
             memory_ids = list(self.redis_client.smembers(agent_key))
-            
-            # Load all memories and analyze
             memories = []
             type_counts = {}
             total_confidence = 0
@@ -294,8 +251,6 @@ class VectorMemoryManager:
                     memories.append(memory)
                     type_counts[memory.memory_type.value] = type_counts.get(memory.memory_type.value, 0) + 1
                     total_confidence += memory.confidence
-            
-            # Calculate statistics
             avg_confidence = total_confidence / len(memories) if memories else 0
             recent_memories = sorted(memories, key=lambda m: m.timestamp, reverse=True)[:5]
             most_accessed = sorted(memories, key=lambda m: m.access_count, reverse=True)[:3]
@@ -324,8 +279,6 @@ class VectorMemoryManager:
                 memory = self._load_memory(memory_id)
                 if memory:
                     memories.append(memory)
-            
-            # Find and merge very similar memories
             consolidated_count = 0
             for i, memory1 in enumerate(memories):
                 for j, memory2 in enumerate(memories[i+1:], i+1):
@@ -333,13 +286,10 @@ class VectorMemoryManager:
                         similarity = self._calculate_similarity(memory1.vector, memory2.vector)
                         
                         if similarity >= similarity_threshold:
-                            # Merge memories (keep the one with higher confidence)
                             if memory1.confidence >= memory2.confidence:
-                                # Remove memory2
                                 self._delete_memory(memory2.id)
                                 consolidated_count += 1
                             else:
-                                # Remove memory1
                                 self._delete_memory(memory1.id)
                                 consolidated_count += 1
                             break
@@ -354,41 +304,31 @@ class VectorMemoryManager:
     def _delete_memory(self, memory_id: str):
         """Delete a memory and clean up indices"""
         try:
-            # Get memory data first
             memory_data = self.redis_client.hgetall(memory_id)
             if memory_data:
                 agent_id = memory_data.get("agent_id")
                 memory_type = memory_data.get("memory_type")
-                
-                # Remove from indices
                 if agent_id:
                     self.redis_client.srem(f"agent_memories:{agent_id}", memory_id)
                 if memory_type:
                     self.redis_client.srem(f"type_memories:{memory_type}", memory_id)
-            
-            # Delete the memory itself
-            self.redis_client.delete(memory_id)
-            
+            self.redis_client.delete(memory_id)   
         except Exception as e:
             self.logger.error(f"Failed to delete memory {memory_id}: {e}")
 
     def get_memory_insights(self) -> Dict[str, Any]:
         """Get system-wide memory insights"""
         try:
-            # Get all memory keys
             memory_keys = self.redis_client.keys("memory:*")
-            
-            # Analyze memory distribution
             agent_counts = {}
             type_counts = {}
             total_memories = len(memory_keys)
             
-            for memory_key in memory_keys[:100]:  # Sample first 100 for performance
+            for memory_key in memory_keys[:100]: 
                 memory = self._load_memory(memory_key)
                 if memory:
                     agent_counts[memory.agent_id] = agent_counts.get(memory.agent_id, 0) + 1
                     type_counts[memory.memory_type.value] = type_counts.get(memory.memory_type.value, 0) + 1
-            
             return {
                 "total_memories": total_memories,
                 "memories_by_agent": agent_counts,
@@ -397,8 +337,7 @@ class VectorMemoryManager:
                     "agent_indices": len(self.redis_client.keys("agent_memories:*")),
                     "type_indices": len(self.redis_client.keys("type_memories:*"))
                 }
-            }
-            
+            }    
         except Exception as e:
             self.logger.error(f"Failed to get memory insights: {e}")
             return {}

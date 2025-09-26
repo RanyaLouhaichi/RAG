@@ -7,8 +7,6 @@ from requests.packages.urllib3.util.retry import Retry # type: ignore
 from integrations.api_config import APIConfig
 
 class JiraAPIClient:
-    """Client for interacting with Jira REST API"""
-    
     def __init__(self):
         self.base_url = APIConfig.JIRA_URL
         self.auth = APIConfig.get_jira_auth()
@@ -17,8 +15,6 @@ class JiraAPIClient:
             "Content-Type": "application/json"
         }
         self.logger = logging.getLogger("JiraAPIClient")
-        
-        # Setup session with retry strategy
         self.session = requests.Session()
         retry_strategy = Retry(
             total=APIConfig.API_MAX_RETRIES,
@@ -102,19 +98,15 @@ class JiraAPIClient:
         """Search issues using JQL"""
         if max_results is None:
             max_results = APIConfig.API_PAGE_SIZE
-        
         params = {
             "jql": jql,
             "startAt": start_at,
             "maxResults": max_results,
-            "expand": "changelog,renderedFields,transitions",  # Add transitions
+            "expand": "changelog,renderedFields,transitions",  
             "fields": "*all,comment"  
         }
-        
         self.logger.info(f"Searching issues with JQL: {jql}")
         result = self._make_request("GET", "search", params=params)
-        
-        # DEBUG: Log what we got
         if result.get("issues"):
             first_issue = result["issues"][0]
             self.logger.info(f"[DEBUG] Sample issue fields: {list(first_issue.get('fields', {}).keys())[:20]}")
@@ -129,31 +121,21 @@ class JiraAPIClient:
         }
         return self._make_request("GET", f"issue/{issue_key}", params=params)
     
-    # Fix for jira_api_client.py - get_all_issues_for_project method
-
     def get_all_issues_for_project(self, project_key: str, start_date: str = None, end_date: str = None) -> List[Dict[str, Any]]:
         """Get all issues for a project with optional date filtering"""
-        # Build JQL - start with just the project
         jql = f"project = {project_key}"
-        
-        # Only add date filtering if BOTH dates are explicitly provided and valid
         if start_date and end_date and start_date != "None" and end_date != "None":
-            # Validate dates aren't empty strings
             if len(start_date.strip()) > 0 and len(end_date.strip()) > 0:
                 jql += f" AND updated >= '{start_date}' AND updated <= '{end_date}'"
                 self.logger.info(f"Using date filter: {start_date} to {end_date}")
         else:
             self.logger.info(f"No date filter - fetching ALL issues for project {project_key}")
-        
-        # Always order by updated date
         jql += " ORDER BY updated DESC"
         
         self.logger.info(f"Final JQL query: {jql}")
-        
         all_issues = []
         start_at = 0
         total = None
-        
         while True:
             try:
                 result = self.search_issues(jql, start_at=start_at)
@@ -163,14 +145,10 @@ class JiraAPIClient:
                 if total is None:
                     total = result.get("total", 0)
                     self.logger.info(f"Total issues matching query: {total}")
-                
-                # Check if we've fetched all issues
                 if len(all_issues) >= total or len(issues) < APIConfig.API_PAGE_SIZE:
                     break
-                
                 start_at += len(issues)
                 self.logger.info(f"Fetched {len(all_issues)}/{total} issues...")
-                
             except Exception as e:
                 self.logger.error(f"Error fetching issues at offset {start_at}: {e}")
                 break
@@ -187,10 +165,8 @@ class JiraAPIClient:
                 "issuetype": {"name": issue_type}
             }
         }
-        
         if description:
             issue_data["fields"]["description"] = description
-        
         self.logger.info(f"Creating issue in project {project_key}: {summary}")
         return self._make_request("POST", "issue", json=issue_data)
     

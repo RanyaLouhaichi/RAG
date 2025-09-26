@@ -1,6 +1,3 @@
-# orchestrator/core/collaborative_framework.py
-# CRITICAL FIX: Now properly passes articles back to requesting agents!
-
 from typing import Dict, Any, List, Optional, Set, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -35,7 +32,6 @@ class CollaborationRequest:
     reasoning: str = ""
 
 class CollaborativeFramework:
-    """FIXED VERSION - Now properly merges articles back to requesting agents"""
     
     def __init__(self, redis_client: redis.Redis, agents_registry: Dict[str, BaseAgent], 
                  shared_model_manager=None):  # ADD THIS PARAMETER
@@ -120,8 +116,6 @@ class CollaborativeFramework:
                 "reason": "no_collaboration_needed"
             }
             return primary_result
-        
-        # Step 3: FIXED - Orchestrate collaboration with proper data merging
         self.logger.info(f"🤝 FIXED collaboration orchestration for {len(collaboration_needs)} needs")
         enhanced_result = await self._orchestrate_collaboration_fixed(
             primary_agent_id, primary_result, collaboration_needs, task_context
@@ -139,8 +133,6 @@ class CollaborativeFramework:
         agent_name = agent.name
         
         self.logger.info(f"🔍 Analyzing collaboration needs for {agent_name}")
-        
-        # Check 1: Explicit collaboration requests from agent's mental state
         if hasattr(agent.mental_state, 'collaborative_requests'):
             recent_requests = agent.mental_state.collaborative_requests[-3:]
             for req in recent_requests:
@@ -154,13 +146,9 @@ class CollaborativeFramework:
                         context=req.get('context', {}),
                         reasoning=f"Explicit request for {req.get('agent_type')} collaboration"
                     ))
-
-        # Check 2: SPECIAL CASE - RecommendationAgent with no articles but needs context
         if agent_name == "recommendation_agent":
             articles = context.get("articles", [])
             recommendations = result.get("recommendations", [])
-            
-            # If we have no articles OR generic recommendations, request context enrichment
             if (not articles or 
                 (recommendations and any("provide more" in str(rec).lower() for rec in recommendations))):
                 
@@ -176,8 +164,6 @@ class CollaborativeFramework:
                     },
                     reasoning="RecommendationAgent needs articles for better context"
                 ))
-
-        # Check 3: Low confidence in results
         if hasattr(agent.mental_state, 'beliefs'):
             low_confidence_beliefs = []
             for key, belief in agent.mental_state.beliefs.items():
@@ -212,7 +198,7 @@ class CollaborativeFramework:
             "collaboration_types": [],
             "collaboration_quality": 0.0,
             "start_time": datetime.now().isoformat(),
-            "articles_retrieved": 0,  # Track articles specifically
+            "articles_retrieved": 0,
             "articles_merged": False
         }
 
@@ -235,23 +221,17 @@ class CollaborativeFramework:
             collaborating_agent = self.agents_registry[collaborating_agent_id]
             
             self.logger.info(f"🤝 FIXED collaboration with {collaborating_agent_id} for {need.needed_capability.value}")
-            
-            # CRITICAL FIX: Prepare enhanced context with proper primary agent result
             enhanced_context = self._prepare_collaboration_context_fixed(
                 context, primary_result, need, collaboration_metadata
             )
             
             try:
                 collaboration_result = collaborating_agent.run(enhanced_context)
-                
-                # CRITICAL FIX: Enhanced result merging with special handling for articles
                 enhanced_result = self._merge_results_fixed(enhanced_result, collaboration_result, need)
                 
                 successful_collaborations += 1
                 collaboration_metadata["collaborating_agents"].append(collaborating_agent_id)
                 collaboration_metadata["collaboration_types"].append(need.needed_capability.value)
-                
-                # CRITICAL FIX: Track article retrieval specifically
                 if need.needed_capability == CollaborationNeed.CONTEXT_ENRICHMENT:
                     articles_retrieved = len(collaboration_result.get("articles", []))
                     collaboration_metadata["articles_retrieved"] += articles_retrieved
@@ -264,12 +244,9 @@ class CollaborativeFramework:
             except Exception as e:
                 self.logger.error(f"❌ Collaboration with {collaborating_agent_id} failed: {str(e)}")
                 continue
-
-        # CRITICAL FIX: Ensure articles are in the final result for recommendation agent
         if primary_agent_id == "recommendation_agent" and collaboration_metadata["articles_retrieved"] > 0:
             if "articles" not in enhanced_result or not enhanced_result["articles"]:
                 self.logger.error("🚨 CRITICAL: Articles were retrieved but not in final result - fixing now!")
-                # Find articles from collaboration metadata or reconstruct
                 for agent_id in collaboration_metadata["collaborating_agents"]:
                     if "retrieval" in agent_id:
                         self.logger.info(f"🔧 Attempting to recover articles from {agent_id} collaboration")
@@ -290,17 +267,13 @@ class CollaborativeFramework:
                                            collaboration_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """FIXED VERSION - Properly prepares context for collaboration"""
         enhanced_context = original_context.copy()
-        
-        # Add results from primary agent
         enhanced_context["primary_agent_result"] = primary_result
         enhanced_context["collaboration_purpose"] = need.needed_capability.value
         enhanced_context["collaboration_reasoning"] = need.reasoning
         
-        # CRITICAL FIX: For context enrichment, enhance the user prompt with recommendation context
         if need.needed_capability == CollaborationNeed.CONTEXT_ENRICHMENT:
             recommendations = primary_result.get("recommendations", [])
             if recommendations:
-                # Enhance the search query with recommendation keywords
                 original_prompt = enhanced_context.get("user_prompt", "")
                 enhanced_prompt = f"{original_prompt} recommendations context: {' '.join(recommendations[:2])}"
                 enhanced_context["user_prompt"] = enhanced_prompt
@@ -325,17 +298,14 @@ class CollaborativeFramework:
         self.logger.info(f"🔧 FIXED merging results for {need.needed_capability.value}")
         
         if need.needed_capability == CollaborationNeed.CONTEXT_ENRICHMENT:
-            # CRITICAL FIX: Ensure articles are properly merged
             retrieved_articles = collaboration_result.get("articles", [])
             
             if retrieved_articles:
-                # Merge with existing articles
                 existing_articles = merged.get("articles", [])
                 
-                # Combine articles, avoiding duplicates
                 all_articles = existing_articles.copy()
                 for new_article in retrieved_articles:
-                    # Simple duplicate check based on content
+
                     is_duplicate = any(
                         article.get("content", "")[:100] == new_article.get("content", "")[:100] 
                         for article in all_articles

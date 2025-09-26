@@ -1,4 +1,3 @@
-# orchestrator/core/orchestrator.py - COMPLETE VERSION WITH FULL LANGSMITH INTEGRATION
 import json
 import re
 import sys
@@ -35,12 +34,8 @@ class Orchestrator:
     
     def __init__(self):
         self.shared_memory = JurixSharedMemory()
-        
-        # Create a single shared ModelManager instance
         from orchestrator.core.model_manager import ModelManager # type: ignore
         self.shared_model_manager = ModelManager(redis_client=self.shared_memory.redis_client)
-        
-        # Initialize all agents with shared model manager
         self.chat_agent = ChatAgent(self.shared_memory)
         self.chat_agent.model_manager = self.shared_model_manager
         
@@ -87,7 +82,6 @@ class Orchestrator:
             shared_model_manager=self.shared_model_manager
         )
 
-        # Initialize MCP manager but don't try to connect yet
         self.mcp_manager = MCPManager(self)
         self.mcp_connected = False
         
@@ -161,8 +155,7 @@ class Orchestrator:
         """Enhanced workflow with COMPLETE LangSmith tracing"""
         conversation_id = conversation_id or str(uuid.uuid4())
         workflow_id = f"workflow_{conversation_id}_{datetime.now().strftime('%H%M%S')}"
-        
-        # Create workflow metadata for tracing
+
         workflow_metadata = {
             "workflow_id": workflow_id,
             "workflow_type": "chat_workflow",
@@ -170,10 +163,8 @@ class Orchestrator:
             "query": query[:200],
             "timestamp": datetime.now().isoformat()
         }
-        
-        # Start LangSmith workflow tracing
         with langsmith_monitor.trace_workflow("chat_workflow", workflow_metadata) as workflow_run:
-            # Start workflow tracking
+
             self.shared_model_manager.start_workflow_tracking(workflow_id)
             
             state = JurixState(
@@ -206,8 +197,6 @@ class Orchestrator:
             
             collaboration_trace = []
             articles_tracking = []
-            
-            # Track each step in the workflow
             for event in workflow.stream(state):
                 for node_name, node_state in event.items():
                     # Log to LangSmith
@@ -227,7 +216,6 @@ class Orchestrator:
                             "articles_count": articles_count
                         })
                         
-                        # Trace collaboration to LangSmith
                         if workflow_run and collab_info.get("collaborating_agents"):
                             for collab_agent in collab_info["collaborating_agents"]:
                                 langsmith_monitor.trace_collaboration(
@@ -249,8 +237,6 @@ class Orchestrator:
                 final_state["articles_tracking"] = articles_tracking
                 workflow_summary = self.shared_model_manager.get_workflow_summary()
                 final_state["model_usage_summary"] = workflow_summary
-                
-                # Add LangSmith metrics to final state
                 final_state["langsmith_metrics"] = langsmith_monitor.get_metrics_summary()
             
             logger.info(f"✅ Chat workflow completed with LangSmith metrics")
@@ -261,8 +247,7 @@ class Orchestrator:
         """Productivity workflow with COMPLETE LangSmith tracing"""
         conversation_id = conversation_id or str(uuid.uuid4())
         workflow_id = f"productivity_{project_id}_{datetime.now().strftime('%H%M%S')}"
-        
-        # Create workflow metadata for tracing
+
         workflow_metadata = {
             "workflow_id": workflow_id,
             "workflow_type": "productivity_analysis",
@@ -273,9 +258,7 @@ class Orchestrator:
             "timestamp": datetime.now().isoformat()
         }
         
-        # Start LangSmith workflow tracing
         with langsmith_monitor.trace_workflow("productivity_workflow", workflow_metadata) as workflow_run:
-            # Start workflow tracking
             self.shared_model_manager.start_workflow_tracking(workflow_id)
             
             state = JurixState(
@@ -330,7 +313,6 @@ class Orchestrator:
             
             for event in workflow.stream(state):
                 for node_name, node_state in event.items():
-                    # Log to LangSmith
                     if workflow_run:
                         agent_run = langsmith_monitor.trace_agent(
                             node_name,
@@ -344,8 +326,6 @@ class Orchestrator:
                             "collaboration": collab_metadata,
                             "timestamp": datetime.now().isoformat()
                         })
-                        
-                        # Trace collaboration to LangSmith
                         if workflow_run and collab_metadata.get("collaborating_agents"):
                             for collab_agent in collab_metadata["collaborating_agents"]:
                                 langsmith_monitor.trace_collaboration(
@@ -368,8 +348,6 @@ class Orchestrator:
         """JIRA workflow with COMPLETE LangSmith tracing"""
         conversation_id = conversation_id or str(uuid.uuid4())
         workflow_id = f"jira_{ticket_id}_{datetime.now().strftime('%H%M%S')}"
-        
-        # Create workflow metadata for tracing
         workflow_metadata = {
             "workflow_id": workflow_id,
             "workflow_type": "jira_article_generation",
@@ -378,10 +356,7 @@ class Orchestrator:
             "conversation_id": conversation_id,
             "timestamp": datetime.now().isoformat()
         }
-        
-        # Start LangSmith workflow tracing
         with langsmith_monitor.trace_workflow("jira_workflow", workflow_metadata) as workflow_run:
-            # Start workflow tracking
             self.shared_model_manager.start_workflow_tracking(workflow_id)
             
             state = JurixState(
@@ -419,8 +394,6 @@ class Orchestrator:
             )
             
             logger.info(f"🎬 Starting JIRA workflow for ticket {ticket_id} with LangSmith tracing")
-            
-            # Get recommendations with tracing
             if workflow_run:
                 rec_run = langsmith_monitor.trace_agent(
                     "recommendation_agent_pre",
@@ -439,7 +412,6 @@ class Orchestrator:
             
             for event in workflow.stream(state):
                 for node_name, node_state in event.items():
-                    # Log to LangSmith
                     if workflow_run:
                         agent_run = langsmith_monitor.trace_agent(
                             node_name,
@@ -453,8 +425,6 @@ class Orchestrator:
                             "collaboration": collab_metadata,
                             "timestamp": datetime.now().isoformat()
                         })
-                        
-                        # Trace collaboration
                         if workflow_run and collab_metadata.get("collaborating_agents"):
                             for collab_agent in collab_metadata["collaborating_agents"]:
                                 langsmith_monitor.trace_collaboration(
@@ -465,8 +435,6 @@ class Orchestrator:
                                 )
                     
                     final_state = node_state
-                    
-                    # Handle recommendation refinement with tracing
                     if (node_name == "jira_article_generator" and 
                         final_state.get("article") and 
                         "provide more project-specific details" in str(final_state.get("recommendations", []))):
@@ -500,8 +468,6 @@ class Orchestrator:
         """Predictive workflow with COMPLETE LangSmith tracing"""
         conversation_id = conversation_id or str(uuid.uuid4())
         workflow_id = f"predictive_{project_id}_{datetime.now().strftime('%H%M%S')}"
-        
-        # Create workflow metadata for tracing
         workflow_metadata = {
             "workflow_id": workflow_id,
             "workflow_type": "predictive_analysis",
@@ -510,10 +476,7 @@ class Orchestrator:
             "conversation_id": conversation_id,
             "timestamp": datetime.now().isoformat()
         }
-        
-        # Start LangSmith workflow tracing
         with langsmith_monitor.trace_workflow("predictive_workflow", workflow_metadata) as workflow_run:
-            # Start workflow tracking
             self.shared_model_manager.start_workflow_tracking(workflow_id)
             
             state = JurixState(
@@ -571,7 +534,6 @@ class Orchestrator:
             
             for event in workflow.stream(state):
                 for node_name, node_state in event.items():
-                    # Log to LangSmith
                     if workflow_run:
                         agent_run = langsmith_monitor.trace_agent(
                             node_name,
@@ -585,8 +547,6 @@ class Orchestrator:
                             "collaboration": collab_metadata,
                             "timestamp": datetime.now().isoformat()
                         })
-                        
-                        # Trace collaboration
                         if workflow_run and collab_metadata.get("collaborating_agents"):
                             for collab_agent in collab_metadata["collaborating_agents"]:
                                 langsmith_monitor.trace_collaboration(
@@ -621,8 +581,6 @@ class Orchestrator:
         except Exception as e:
             self.logger.error(f"Failed to publish article: {e}", exc_info=True)
             return {"status": "error", "error": str(e)}
-
-    # Keep all the existing workflow building methods unchanged
     def _build_general_workflow(self):
         workflow = StateGraph(JurixState)
         
@@ -748,8 +706,6 @@ class Orchestrator:
         workflow.add_edge("recommendation_agent", END)
         
         return workflow.compile()
-
-    # All the node methods remain the same
     def _ensure_real_project(self, state: JurixState) -> JurixState:
         project = state.get("project") or state.get("project_id")
         
@@ -1515,10 +1471,7 @@ class Orchestrator:
         
         return updated_state
 
-# Create the global orchestrator instance
 orchestrator = Orchestrator()
-
-# Wrapper functions for backward compatibility
 def run_workflow(query: str, conversation_id: str = None) -> JurixState:
     return orchestrator.run_workflow(query, conversation_id)
 
